@@ -1,0 +1,7 @@
+// Default gateway address for the iOS Simulator.
+// The model provider is selected on the gateway machine, not in this file.
+// Write http:// as http:/$()/ so xcconfig does not treat // as a comment.
+INFERENCE_BASE_URL = http:/$()/127.0.0.1:8787
+INFERENCE_API_KEY =
+
+#include "Secrets.xcconfig"

@@ -9,3 +9,5 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 .swiftpm/
+.env
+gateway/.env

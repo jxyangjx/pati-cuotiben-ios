@@ -23,6 +23,8 @@ struct PrivacyConsentView: View {
                         Text("不会上传到对象存储，也不会做多设备同步。卸载 App 或清除数据后，这些内容会消失。")
                         Text("同意之后才能建立孩子档案，以及开始第一次批改。")
                             .foregroundStyle(.secondary)
+                        Text("默认批改在本机离线桩完成。如果以后在设置里改用推理网关，只会送出当题文字，照片仍留在这台手机上。")
+                            .foregroundStyle(.secondary)
                     }
                     .font(.body)
                     .cardChrome()

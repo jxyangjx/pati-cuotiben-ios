@@ -103,7 +103,7 @@ struct ImportView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(job.sortedPages.isEmpty || working)
                 if working {
-                    ProgressView("正在识别本机上的印刷文字")
+                    ProgressView(session.inferenceMode == .live ? "正在识别印刷文字，并向网关请求标答" : "正在识别本机上的印刷文字")
                         .font(.caption)
                 } else if job.sortedPages.isEmpty {
                     Text("至少需要一页。")

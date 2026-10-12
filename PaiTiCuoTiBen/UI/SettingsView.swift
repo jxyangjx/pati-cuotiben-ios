@@ -10,12 +10,17 @@ private enum SettingsRoute: Hashable {
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
+    @EnvironmentObject private var session: AppSession
     @Query private var children: [Child]
     @Query private var jobs: [LocalJob]
     @Query private var wrongItems: [WrongItem]
+    @AppStorage(DefaultsKey.inferenceMode) private var inferenceMode = InferenceMode.stub.rawValue
+    @AppStorage(DefaultsKey.inferenceBaseURL) private var inferenceBaseURL = ""
     @State private var exportURL: URL?
     @State private var message: String?
     @State private var confirmPurge = false
+    @State private var gatewayKey = ""
+    @State private var hasGatewayKey = false
 
     var body: some View {
         NavigationStack {
@@ -51,9 +56,38 @@ struct SettingsView: View {
                 }
             }
 
+            Section("推理") {
+                Picker("来源", selection: $inferenceMode) {
+                    Text("离线桩").tag(InferenceMode.stub.rawValue)
+                    Text("推理网关").tag(InferenceMode.live.rawValue)
+                }
+                if inferenceMode == InferenceMode.live.rawValue {
+                    TextField("网关地址", text: $inferenceBaseURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    SecureField("网关密钥（可选）", text: $gatewayKey)
+                    Button("保存密钥到钥匙串") { saveGatewayKey() }
+                    Button("清除钥匙串里的密钥", role: .destructive) { clearGatewayKey() }
+                    Text(hasGatewayKey ? "钥匙串里已有网关密钥。" : "尚未保存网关密钥。本地网关可以不设密钥。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text("当前地址：\(InferenceConfig.baseURLString(userValue: inferenceBaseURL))")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text("照片和错题仍留在本机。网关只接收当题文字，不接收照片，也不使用对象存储。厂商、模型和厂商密钥在运行网关的电脑上配置。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("离线桩在本机返回标答、判分、错因和题型总结，不会出网。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("关于") {
                 LabeledContent("版本", value: "0.1.0")
-                Text("一期骨架：模式 A，本机 SwiftData，推理接口是离线桩。")
+                Text("模式 A。照片和错题在本机。推理默认是离线桩，也可以改用本机推理网关。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -77,6 +111,16 @@ struct SettingsView: View {
         } message: {
             Text("错题本里的裁切快照会留下。结构化的题目和错题也不会删。")
         }
+        .onAppear {
+            hasGatewayKey = InferenceKeychain.hasSecret
+            session.reloadInference()
+        }
+        .onChange(of: inferenceMode) { _, _ in
+            session.reloadInference()
+        }
+        .onChange(of: inferenceBaseURL) { _, _ in
+            session.reloadInference()
+        }
         .alert(
             "提示",
             isPresented: Binding(
@@ -99,6 +143,26 @@ struct SettingsView: View {
         }
     }
 
+    private func saveGatewayKey() {
+        do {
+            try InferenceKeychain.save(gatewayKey)
+            gatewayKey = ""
+            hasGatewayKey = InferenceKeychain.hasSecret
+            session.reloadInference()
+            message = hasGatewayKey ? "网关密钥已保存在本机钥匙串。" : "已清除网关密钥。"
+        } catch {
+            message = (error as? LocalizedError)?.errorDescription ?? "密钥没有保存。"
+        }
+    }
+
+    private func clearGatewayKey() {
+        InferenceKeychain.clear()
+        gatewayKey = ""
+        hasGatewayKey = false
+        session.reloadInference()
+        message = "已清除网关密钥。"
+    }
+
     private func purge() {
         do {
             let count = try JobPipeline.purgeOriginals(olderThan: 30, context: context)
@@ -116,7 +180,7 @@ struct PrivacyView: View {
                 Text("仅用于本人作业整理。照片、识别文字、标答和错题保存在这台手机的沙盒里，使用 SwiftData 和本地文件。")
                 Text("相机和相册权限只用来拍摄或导入自己的作业页面。")
                 Text("卸载 App 或清除数据后，这些内容会消失。需要留存时，请在设置里导出备份包。")
-                Text("本期推理是离线桩，调用不会离开这台手机。以后如果接入解题接口，只会短暂送出当题的裁切或文字，不在我们的服务器保存。")
+                Text("默认批改走本机离线桩。设置里改成推理网关后，只会送出当题文字，照片仍留在这台手机上，也不会写入对象存储。")
                 Text("页面原图可以按时间清理。错题本另外保留裁切快照和作答、标答、错因。")
                 Text("本期以本机孩子档案使用，不做多设备同步，也不提供微信登录。Apple 登录可以以后再加。")
             }
@@ -138,7 +202,7 @@ struct UsageView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("孩子档案、切题核对和错题本都在本机完成，不产生对象存储费用。")
-                Text("真实的标答、判分、错因和题型总结按次可能计费。当前按钮走离线桩，不会出网，也不会计费。")
+                Text("离线桩不会计费，也不会出网。推理网关按所选厂商的价格计费，密钥留在运行网关的电脑上。")
                 VStack(alignment: .leading, spacing: 8) {
                     Text("自动锁定阈值 \(lockThreshold, format: .number.precision(.fractionLength(2)))")
                         .font(.headline)

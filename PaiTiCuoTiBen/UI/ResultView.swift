@@ -187,7 +187,9 @@ struct ResultView: View {
         )
         do {
             groups = try await session.inference.summaryGroups(request)
-            summaryNote = nil
+            summaryNote = session.inferenceMode == .live
+                ? "分类总结来自推理网关，只上传了题干和判定结果。"
+                : "分类总结来自本机离线桩。"
         } catch {
             groups = []
             summaryNote = "题型总结暂时没有生成。"

@@ -7,7 +7,7 @@ enum InferencePath {
     static let summaryGroups = "/v1/inference/summary-groups"
 }
 
-struct SolveRequest: Equatable, Sendable {
+struct SolveRequest: Equatable, Sendable, Codable {
     var stemText: String
     var studentAnswer: String
     var subject: String
@@ -15,7 +15,7 @@ struct SolveRequest: Equatable, Sendable {
     var teacherKeyFilename: String?
 }
 
-struct SolveResponse: Equatable, Sendable {
+struct SolveResponse: Equatable, Sendable, Codable {
     var text: String
     var steps: [String]
     var explanation: String
@@ -24,7 +24,7 @@ struct SolveResponse: Equatable, Sendable {
     var sourceRefs: [String]
 }
 
-struct GradeRequest: Equatable, Sendable {
+struct GradeRequest: Equatable, Sendable, Codable {
     var studentAnswer: String
     var canonicalText: String
     var questionType: String
@@ -37,7 +37,7 @@ struct GradeResponse: Equatable, Sendable {
     var suggestedAuthority: VerdictAuthority
 }
 
-struct ErrorAnalysisRequest: Equatable, Sendable {
+struct ErrorAnalysisRequest: Equatable, Sendable, Codable {
     var stemText: String
     var studentAnswer: String
     var canonicalText: String
@@ -46,24 +46,24 @@ struct ErrorAnalysisRequest: Equatable, Sendable {
     var subject: String
 }
 
-struct ErrorAnalysisResponse: Equatable, Sendable {
+struct ErrorAnalysisResponse: Equatable, Sendable, Codable {
     var points: [String]
     var avoidanceTips: [String]
 }
 
-struct SummaryQuestionInput: Equatable, Sendable {
+struct SummaryQuestionInput: Equatable, Sendable, Codable {
     var questionType: String
     var result: VerdictResult
     var stemText: String
 }
 
-struct SummaryGroupsRequest: Equatable, Sendable {
+struct SummaryGroupsRequest: Equatable, Sendable, Codable {
     var subject: String
     var grade: String
     var questions: [SummaryQuestionInput]
 }
 
-struct SummaryGroup: Equatable, Sendable, Identifiable {
+struct SummaryGroup: Equatable, Sendable, Identifiable, Codable {
     var questionType: String
     var correctCount: Int
     var wrongCount: Int

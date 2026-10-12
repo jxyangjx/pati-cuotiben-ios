@@ -242,6 +242,9 @@ enum AppError: LocalizedError, Equatable {
     case privacyConsentRequired
     case noPrintedText
     case recognitionFailed
+    case inferenceUnavailable
+    case inferenceFailed
+    case inferenceKeychainFailed
 
     var errorDescription: String? {
         switch self {
@@ -267,6 +270,12 @@ enum AppError: LocalizedError, Equatable {
             "这些页面没有识别到印刷文字。请换一张更清晰的作业照片。"
         case .recognitionFailed:
             "有一页无法在本机识别。请重拍，或换一张更清晰的照片。"
+        case .inferenceUnavailable:
+            "还没有可用的推理网关地址。请在设置里填写，或改回离线桩。"
+        case .inferenceFailed:
+            "推理网关没有返回结果。请确认网关已启动，或改回离线桩。"
+        case .inferenceKeychainFailed:
+            "网关密钥没有写入钥匙串。请再试一次。"
         }
     }
 }

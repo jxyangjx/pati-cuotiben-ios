@@ -68,6 +68,9 @@ struct ReviewView: View {
             Text("\(job.subject.rawValue) · \(job.grade.rawValue)")
                 .font(.headline)
             Text("题干和作答来自本机 Vision 印刷文字识别，可以直接改正。系统先批：有把握的客观题会直接锁定，其余保持待确认。")
+            Text(session.inferenceMode == .live
+                ? "标答和判分会把当题文字发给设置里的推理网关。照片仍留在本机。"
+                : "标答和判分使用本机离线桩，不会出网。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if let filename = job.teacherKeyFilename {

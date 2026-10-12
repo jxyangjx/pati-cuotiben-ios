@@ -4,10 +4,19 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>拍题错题本</string>
+	<key>InferenceAPIKey</key>
+	<string>$(INFERENCE_API_KEY)</string>
+	<key>InferenceBaseURL</key>
+	<string>$(INFERENCE_BASE_URL)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.education</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>仅用于本人作业整理。用于拍摄作业和试卷，照片只保存在这台手机上。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
