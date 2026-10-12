@@ -7,16 +7,22 @@ final class JobPipelineTests: XCTestCase {
     private var container: ModelContainer?
     private var childIDs: [UUID] = []
 
+    override func setUp() {
+        super.setUp()
+        UserDefaults.standard.set(true, forKey: DefaultsKey.privacyConsentAccepted)
+    }
+
     override func tearDown() {
         for id in childIDs {
             SandboxStore.removeTree(relativePath: SandboxPath.childDirectory(childID: id))
         }
         childIDs = []
         container = nil
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.privacyConsentAccepted)
         super.tearDown()
     }
 
-    func testMockParseSeparatesAutoWrongFromPending() async throws {
+    func testRecognizePagesSeparatesAutoWrongFromPending() async throws {
         let context = try makeContext()
         let job = try await seedJob(context: context)
         XCTAssertEqual(job.mode, .a)
@@ -24,6 +30,11 @@ final class JobPipelineTests: XCTestCase {
         XCTAssertEqual(job.sortedQuestions.count, 2)
 
         let arithmetic = try XCTUnwrap(job.sortedQuestions.first { $0.questionType == "计算题" })
+        XCTAssertEqual(arithmetic.stemText, "1. 计算：1 + 1 = ?")
+        XCTAssertEqual(arithmetic.stemRawOCR, arithmetic.stemText)
+        XCTAssertGreaterThan(arithmetic.ocrConfidence, PrintedQuestionSegmenter.lowConfidenceThreshold)
+        XCTAssertEqual(arithmetic.answer?.rawOCR, "3")
+        XCTAssertFalse(arithmetic.stemText.contains("模拟"))
         XCTAssertEqual(arithmetic.canonicalAnswer?.text, "2")
         XCTAssertEqual(arithmetic.canonicalAnswer?.steps, ["1 加 1 得 2。"])
         XCTAssertEqual(arithmetic.canonicalAnswer?.confirmation, .confirmed)
@@ -217,13 +228,100 @@ final class JobPipelineTests: XCTestCase {
                 context: context
             )
         }
-        try await JobPipeline.mockParse(
+        let outcome = try await JobPipeline.recognizePages(
             job: job,
             context: context,
             inference: inference,
+            threshold: GradingPolicy.defaultLockThreshold,
+            recognizer: FixturePageTextRecognizer()
+        )
+        XCTAssertEqual(outcome.questionCount, 2)
+        XCTAssertTrue(outcome.emptyPageNumbers.isEmpty)
+        return job
+    }
+
+    func testEditedOCRTextResolvesAgain() async throws {
+        let context = try makeContext()
+        let job = try await seedJob(context: context)
+        let arithmetic = try XCTUnwrap(job.sortedQuestions.first { $0.questionType == "计算题" })
+        arithmetic.stemText = "计算：1 + 1 = ?"
+        arithmetic.answer?.userConfirmed = "2"
+        try await JobPipeline.reprocessEditedText(
+            question: arithmetic,
+            job: job,
+            context: context,
+            inference: StubInferenceClient(),
             threshold: GradingPolicy.defaultLockThreshold
         )
-        return job
+        XCTAssertEqual(arithmetic.stemRawOCR, "1. 计算：1 + 1 = ?")
+        XCTAssertEqual(arithmetic.answer?.snapshotText, "2")
+        XCTAssertEqual(arithmetic.canonicalAnswer?.text, "2")
+        XCTAssertEqual(arithmetic.verdict?.result, .correct)
+        XCTAssertEqual(arithmetic.verdict?.locked, true)
+    }
+
+    func testEmptyOCRDoesNotEraseExistingCards() async throws {
+        let context = try makeContext()
+        let job = try await seedJob(context: context)
+        try JobPipeline.addPage(job: job, imageData: tinyJPEG(), context: context)
+        let skipped = try await JobPipeline.recognizePages(
+            job: job,
+            context: context,
+            inference: StubInferenceClient(),
+            threshold: GradingPolicy.defaultLockThreshold,
+            recognizer: SequentialRecognizer(pages: [FixtureLines.worksheet, []])
+        )
+        XCTAssertEqual(skipped.questionCount, 2)
+        XCTAssertEqual(skipped.emptyPageNumbers, [2])
+        XCTAssertEqual(job.sortedQuestions.count, 2)
+
+        do {
+            _ = try await JobPipeline.recognizePages(
+                job: job,
+                context: context,
+                inference: StubInferenceClient(),
+                threshold: GradingPolicy.defaultLockThreshold,
+                recognizer: SequentialRecognizer(pages: [[], []])
+            )
+            XCTFail("Expected no printed text")
+        } catch {
+            XCTAssertEqual(error as? AppError, .noPrintedText)
+        }
+        XCTAssertEqual(job.sortedQuestions.count, 2)
+    }
+
+    func testCreateChildAndRecognizeRequireConsent() async throws {
+        UserDefaults.standard.set(false, forKey: DefaultsKey.privacyConsentAccepted)
+        let context = try makeContext()
+        XCTAssertThrowsError(try JobPipeline.createChild(name: "小明", grade: .junior1, context: context)) { error in
+            XCTAssertEqual(error as? AppError, .privacyConsentRequired)
+        }
+
+        UserDefaults.standard.set(true, forKey: DefaultsKey.privacyConsentAccepted)
+        let child = try JobPipeline.createChild(name: "小明", grade: .junior1, context: context)
+        childIDs.append(child.id)
+        let job = try JobPipeline.createDraft(
+            child: child,
+            grade: .junior1,
+            subject: .math,
+            answerContext: .student,
+            context: context
+        )
+        try JobPipeline.addPage(job: job, imageData: tinyJPEG(), context: context)
+        UserDefaults.standard.set(false, forKey: DefaultsKey.privacyConsentAccepted)
+        do {
+            _ = try await JobPipeline.recognizePages(
+                job: job,
+                context: context,
+                inference: StubInferenceClient(),
+                threshold: GradingPolicy.defaultLockThreshold,
+                recognizer: FixturePageTextRecognizer()
+            )
+            XCTFail("Expected privacy consent")
+        } catch {
+            XCTAssertEqual(error as? AppError, .privacyConsentRequired)
+        }
+        XCTAssertTrue(job.questions.isEmpty)
     }
 
     private func wrongItems(in context: ModelContext) throws -> [WrongItem] {
@@ -237,6 +335,36 @@ final class JobPipelineTests: XCTestCase {
             context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
         }
         return image.jpegData(compressionQuality: 0.8) ?? Data()
+    }
+}
+
+enum FixtureLines {
+    static let worksheet: [OCRLine] = [
+        OCRLine(text: "1. 计算：1 + 1 = ?", boundingBox: CGRect(x: 0.08, y: 0.75, width: 0.70, height: 0.08), confidence: 0.92),
+        OCRLine(text: "3", boundingBox: CGRect(x: 0.08, y: 0.62, width: 0.12, height: 0.06), confidence: 0.90),
+        OCRLine(text: "2. 用自己的话说明这道题在考什么。", boundingBox: CGRect(x: 0.08, y: 0.45, width: 0.80, height: 0.08), confidence: 0.88),
+        OCRLine(text: "我觉得答案写在题干里", boundingBox: CGRect(x: 0.08, y: 0.32, width: 0.55, height: 0.07), confidence: 0.86),
+    ]
+}
+
+struct FixturePageTextRecognizer: PageTextRecognizing {
+    func recognize(imageData: Data) async throws -> [OCRLine] {
+        FixtureLines.worksheet
+    }
+}
+
+final class SequentialRecognizer: PageTextRecognizing {
+    private let pages: [[OCRLine]]
+    private var index = 0
+
+    init(pages: [[OCRLine]]) {
+        self.pages = pages
+    }
+
+    func recognize(imageData: Data) async throws -> [OCRLine] {
+        let lines = index < pages.count ? pages[index] : []
+        index += 1
+        return lines
     }
 }
 

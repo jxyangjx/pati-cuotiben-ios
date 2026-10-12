@@ -1,5 +1,11 @@
+import CoreGraphics
 import Foundation
 import SwiftData
+
+struct PageRecognitionOutcome: Equatable {
+    var questionCount: Int
+    var emptyPageNumbers: [Int]
+}
 
 @MainActor
 enum JobPipeline {
@@ -10,6 +16,7 @@ enum JobPipeline {
     }
 
     static func createChild(name: String, grade: GradeLevel, context: ModelContext) throws -> Child {
+        try PrivacyConsent.require()
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw AppError.invalidName }
         guard ChildPolicy.canActivate(activeCount: activeChildren(context: context).count) else {
@@ -157,14 +164,40 @@ enum JobPipeline {
         try context.save()
     }
 
-    static func mockParse(
+    @discardableResult
+    static func recognizePages(
         job: LocalJob,
         context: ModelContext,
         inference: any InferenceClient,
-        threshold: Double
-    ) async throws {
+        threshold: Double,
+        recognizer: any PageTextRecognizing = VisionPageTextRecognizer()
+    ) async throws -> PageRecognitionOutcome {
+        try PrivacyConsent.require()
         let pages = job.sortedPages
         guard !pages.isEmpty else { throw AppError.noPages }
+
+        var prepared: [PreparedQuestion] = []
+        var emptyPageNumbers: [Int] = []
+        for page in pages {
+            let drafts = try await drafts(on: page, recognizer: recognizer)
+            if drafts.isEmpty {
+                emptyPageNumbers.append(page.order + 1)
+                continue
+            }
+            for draft in drafts {
+                let solved = try await inference.solve(
+                    SolveRequest(
+                        stemText: draft.stem,
+                        studentAnswer: draft.studentAnswer,
+                        subject: job.subjectRaw,
+                        grade: job.gradeRaw,
+                        teacherKeyFilename: job.teacherKeyFilename
+                    )
+                )
+                prepared.append(PreparedQuestion(page: page, draft: draft, solved: solved))
+            }
+        }
+        guard !prepared.isEmpty else { throw AppError.noPrintedText }
 
         for question in Array(job.questions) {
             try deleteWrongItems(sourceQuestionID: question.id, context: context)
@@ -172,93 +205,21 @@ enum JobPipeline {
             context.delete(question)
         }
 
-        var order = 0
-        for page in pages {
-            for spec in mockSpecs(page: page) {
-                let question = Question(
-                    order: order,
-                    pageID: page.id,
-                    stemText: spec.stem,
-                    questionType: "待识别"
-                )
-                context.insert(question)
-                question.job = job
-                if !page.purged, SandboxStore.fileExists(relativePath: page.imageRelativePath) {
-                    let cropPath = SandboxPath.crop(childID: job.childID, jobID: job.id, questionID: question.id)
-                    if (try? SandboxStore.copyFile(from: page.imageRelativePath, to: cropPath)) != nil {
-                        question.cropRelativePath = cropPath
-                    }
-                }
-
-                let solved = try await inference.solve(
-                    SolveRequest(
-                        stemText: spec.stem,
-                        studentAnswer: spec.student,
-                        subject: job.subjectRaw,
-                        grade: job.gradeRaw,
-                        teacherKeyFilename: job.teacherKeyFilename
-                    )
-                )
-                let steps = solved.steps.isEmpty ? ["（步骤待补充）"] : solved.steps
-                let canonical = CanonicalAnswer(
-                    text: solved.text,
-                    steps: steps,
-                    explanation: solved.explanation,
-                    confidence: solved.confidence,
-                    sourceRefs: solved.sourceRefs
-                )
-                context.insert(canonical)
-                question.canonicalAnswer = canonical
-                question.questionType = solved.questionType
-
-                let markHints = job.answerContext == .selfMark ? "疑似已批，自批痕迹不可靠" : nil
-                let answer = Answer(rawOCR: spec.student, markHints: markHints)
-                context.insert(answer)
-                question.answer = answer
-
-                let verdict = Verdict()
-                context.insert(verdict)
-                question.verdict = verdict
-
-                let graded = try await inference.grade(
-                    GradeRequest(
-                        studentAnswer: answer.snapshotText,
-                        canonicalText: canonical.text,
-                        questionType: question.questionType,
-                        canonicalConfidence: canonical.confidence
-                    )
-                )
-                let decision = GradingPolicy.decide(
-                    student: answer.snapshotText,
-                    canonical: canonical.text,
-                    steps: canonical.steps,
-                    questionType: question.questionType,
-                    canonicalConfidence: canonical.confidence,
-                    grade: GradeSignal(
-                        result: graded.result,
-                        confidence: graded.confidence,
-                        suggestedAuthority: graded.suggestedAuthority
-                    ),
-                    adoption: .none,
-                    verdictOverride: nil,
-                    userHoldPending: false,
-                    threshold: threshold
-                )
-                try await apply(
-                    decision: decision,
-                    question: question,
-                    job: job,
-                    context: context,
-                    inference: inference,
-                    runAnalysis: true
-                )
-                order += 1
-            }
+        for (order, item) in prepared.enumerated() {
+            try await install(
+                item: item,
+                order: order,
+                job: job,
+                context: context,
+                inference: inference,
+                threshold: threshold
+            )
         }
 
         job.status = .reviewing
         job.updatedAt = Date()
         try context.save()
+        return PageRecognitionOutcome(questionCount: prepared.count, emptyPageNumbers: emptyPageNumbers)
     }
 
     static func confirmCanonical(
@@ -316,22 +277,41 @@ enum JobPipeline {
         )
     }
 
-    static func regradeStudentAnswer(
+    /// Rebuilds the canonical answer from the current stem and student snapshot, then grades again.
+    static func reprocessEditedText(
         question: Question,
         job: LocalJob,
         context: ModelContext,
         inference: any InferenceClient,
         threshold: Double
     ) async throws {
+        try PrivacyConsent.require()
+        guard let canonical = question.canonicalAnswer else { throw AppError.missingCanonical }
+        let solved = try await inference.solve(
+            SolveRequest(
+                stemText: question.stemText,
+                studentAnswer: question.answer?.snapshotText ?? "",
+                subject: job.subjectRaw,
+                grade: job.gradeRaw,
+                teacherKeyFilename: job.teacherKeyFilename
+            )
+        )
+        canonical.text = solved.text
+        canonical.steps = solved.steps.isEmpty ? ["（步骤待补充）"] : solved.steps
+        canonical.explanation = solved.explanation
+        canonical.confidence = solved.confidence
+        canonical.sourceRefs = solved.sourceRefs
+        question.questionType = solved.questionType
+        question.verdict?.holdPending = false
         try await regrade(
             question: question,
             job: job,
             context: context,
             inference: inference,
             threshold: threshold,
-            adoption: question.canonicalAnswer?.adoption ?? .none,
+            adoption: .none,
             verdictOverride: nil,
-            userHoldPending: question.verdict?.holdPending ?? false
+            userHoldPending: false
         )
     }
 
@@ -633,27 +613,126 @@ enum JobPipeline {
         try? context.save()
     }
 
+    private struct PreparedQuestion {
+        var page: Page
+        var draft: QuestionDraft
+        var solved: SolveResponse
+    }
+
+    private static func drafts(on page: Page, recognizer: any PageTextRecognizing) async throws -> [QuestionDraft] {
+        guard !page.purged, let data = SandboxStore.read(relativePath: page.imageRelativePath), !data.isEmpty else {
+            throw AppError.recognitionFailed
+        }
+        do {
+            let lines = try await recognizer.recognize(imageData: data)
+            return PrintedQuestionSegmenter.segment(lines)
+        } catch let error as AppError {
+            throw error
+        } catch {
+            throw AppError.recognitionFailed
+        }
+    }
+
+    private static func install(
+        item: PreparedQuestion,
+        order: Int,
+        job: LocalJob,
+        context: ModelContext,
+        inference: any InferenceClient,
+        threshold: Double
+    ) async throws {
+        let draft = item.draft
+        let solved = item.solved
+        let question = Question(
+            order: order,
+            pageID: item.page.id,
+            stemText: draft.stem,
+            questionType: solved.questionType,
+            stemRawOCR: draft.stem,
+            ocrConfidence: draft.confidence,
+            crop: draft.crop
+        )
+        context.insert(question)
+        question.job = job
+        attachCrop(question: question, page: item.page, job: job, crop: draft.crop)
+
+        let steps = solved.steps.isEmpty ? ["（步骤待补充）"] : solved.steps
+        let canonical = CanonicalAnswer(
+            text: solved.text,
+            steps: steps,
+            explanation: solved.explanation,
+            confidence: solved.confidence,
+            sourceRefs: solved.sourceRefs
+        )
+        context.insert(canonical)
+        question.canonicalAnswer = canonical
+
+        let markHints = job.answerContext == .selfMark ? "疑似已批，自批痕迹不可靠" : nil
+        let answer = Answer(rawOCR: draft.studentAnswer, markHints: markHints)
+        context.insert(answer)
+        question.answer = answer
+
+        let verdict = Verdict()
+        context.insert(verdict)
+        question.verdict = verdict
+
+        let graded = try await inference.grade(
+            GradeRequest(
+                studentAnswer: answer.snapshotText,
+                canonicalText: canonical.text,
+                questionType: question.questionType,
+                canonicalConfidence: canonical.confidence
+            )
+        )
+        let decision = GradingPolicy.decide(
+            student: answer.snapshotText,
+            canonical: canonical.text,
+            steps: canonical.steps,
+            questionType: question.questionType,
+            canonicalConfidence: canonical.confidence,
+            grade: GradeSignal(
+                result: graded.result,
+                confidence: graded.confidence,
+                suggestedAuthority: graded.suggestedAuthority
+            ),
+            adoption: .none,
+            verdictOverride: nil,
+            userHoldPending: false,
+            threshold: threshold
+        )
+        try await apply(
+            decision: decision,
+            question: question,
+            job: job,
+            context: context,
+            inference: inference,
+            runAnalysis: true
+        )
+    }
+
+    private static func attachCrop(question: Question, page: Page, job: LocalJob, crop: CGRect) {
+        guard !page.purged, SandboxStore.fileExists(relativePath: page.imageRelativePath) else { return }
+        let cropPath = SandboxPath.crop(childID: job.childID, jobID: job.id, questionID: question.id)
+        do {
+            try SandboxStore.cropJPEG(
+                from: page.imageRelativePath,
+                normalizedTopLeft: crop,
+                destination: cropPath
+            )
+            question.cropRelativePath = cropPath
+        } catch {
+            if (try? SandboxStore.copyFile(from: page.imageRelativePath, to: cropPath)) != nil {
+                question.cropRelativePath = cropPath
+            }
+        }
+    }
+
     private static func deleteWrongItems(sourceQuestionID: UUID, context: ModelContext) throws {
         let items = fetch(WrongItem.self, context: context).filter { $0.sourceQuestionID == sourceQuestionID }
         for item in items {
             SandboxStore.remove(relativePath: item.cropRelativePath)
             context.delete(item)
         }
-    }
-
-    private static func mockSpecs(page: Page) -> [(stem: String, student: String)] {
-        let pageNumber = page.order + 1
-        let arithmeticStudent = page.order.isMultiple(of: 2) ? "3" : "2"
-        return [
-            (
-                stem: "（模拟切题）第 \(pageNumber) 页 · 计算：1 + 1 = ?",
-                student: arithmeticStudent
-            ),
-            (
-                stem: "（模拟切题）第 \(pageNumber) 页 · 用自己的话说明这道题在考什么。",
-                student: "我觉得答案写在题干里"
-            ),
-        ]
     }
 
     private static func fetch<T: PersistentModel>(_ type: T.Type, context: ModelContext) -> [T] {

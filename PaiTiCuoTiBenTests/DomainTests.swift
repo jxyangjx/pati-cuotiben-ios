@@ -157,8 +157,10 @@ final class DomainTests: XCTestCase {
     func testStudentSnapshotPrefersConfirmedText() {
         let confirmed = Answer(rawOCR: "3", userConfirmed: "2")
         XCTAssertEqual(confirmed.snapshotText, "2")
-        let blank = Answer(rawOCR: "3", userConfirmed: "  ")
-        XCTAssertEqual(blank.snapshotText, "3")
+        let cleared = Answer(rawOCR: "3", userConfirmed: "  ")
+        XCTAssertEqual(cleared.snapshotText, "")
+        let untouched = Answer(rawOCR: "3", userConfirmed: nil)
+        XCTAssertEqual(untouched.snapshotText, "3")
     }
 
     func testZipArchiveAndChecksum() {

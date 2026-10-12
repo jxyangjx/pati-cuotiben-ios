@@ -38,7 +38,7 @@ struct ReviewView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header(job)
                 if job.sortedQuestions.isEmpty {
-                    Text("还没有题目卡片。回到导入页生成本地卡片。")
+                    Text("还没有题目卡片。回到导入页，识别本机上的印刷文字。")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(job.sortedQuestions) { question in
@@ -50,7 +50,7 @@ struct ReviewView: View {
                             onMarkCorrect: { run(question, job: job) { try await JobPipeline.judge(question: question, job: job, result: .correct, context: context, inference: session.inference, threshold: threshold) } },
                             onMarkWrong: { run(question, job: job) { try await JobPipeline.judge(question: question, job: job, result: .wrong, context: context, inference: session.inference, threshold: threshold) } },
                             onMarkPending: { run(question, job: job) { try await JobPipeline.judge(question: question, job: job, result: .pending, context: context, inference: session.inference, threshold: threshold) } },
-                            onRegrade: { run(question, job: job) { try await JobPipeline.regradeStudentAnswer(question: question, job: job, context: context, inference: session.inference, threshold: threshold) } }
+                            onRegrade: { run(question, job: job) { try await JobPipeline.reprocessEditedText(question: question, job: job, context: context, inference: session.inference, threshold: threshold) } }
                         )
                     }
                 }
@@ -67,7 +67,7 @@ struct ReviewView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("\(job.subject.rawValue) · \(job.grade.rawValue)")
                 .font(.headline)
-            Text("卡片来自本地模拟切题。系统先批：有把握的客观题会直接锁定，其余保持待确认。")
+            Text("题干和作答来自本机 Vision 印刷文字识别，可以直接改正。系统先批：有把握的客观题会直接锁定，其余保持待确认。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if let filename = job.teacherKeyFilename {

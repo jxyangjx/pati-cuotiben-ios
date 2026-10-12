@@ -239,6 +239,9 @@ enum AppError: LocalizedError, Equatable {
     case teacherKeyFormat
     case teacherKeyTooLarge
     case missingCanonical
+    case privacyConsentRequired
+    case noPrintedText
+    case recognitionFailed
 
     var errorDescription: String? {
         switch self {
@@ -258,6 +261,12 @@ enum AppError: LocalizedError, Equatable {
             "老师标答文件超过 30MB。请压缩，或改用图片。"
         case .missingCanonical:
             "系统标答需要最终答案，以及至少一条解题步骤。"
+        case .privacyConsentRequired:
+            "请先同意本机隐私说明，再建立孩子档案或开始批改。照片和识别文字仅用于本人作业整理。"
+        case .noPrintedText:
+            "这些页面没有识别到印刷文字。请换一张更清晰的作业照片。"
+        case .recognitionFailed:
+            "有一页无法在本机识别。请重拍，或换一张更清晰的照片。"
         }
     }
 }

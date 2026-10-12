@@ -32,6 +32,21 @@ struct QuestionCardView: View {
                 .font(.subheadline.weight(.semibold))
             TextField("题干", text: $question.stemText, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
+            if !question.stemRawOCR.isEmpty, question.stemRawOCR != question.stemText {
+                Text("识别原文：\(question.stemRawOCR)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if question.ocrConfidence > 0 {
+                Text("印刷文字识别置信度 \(percent(question.ocrConfidence))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if question.ocrConfidence > 0, question.ocrConfidence < PrintedQuestionSegmenter.lowConfidenceThreshold {
+                Text("识别置信度偏低，请对照原图改正题干和作答。")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.pending)
+            }
 
             studentSection
             canonicalSection
@@ -148,7 +163,7 @@ struct QuestionCardView: View {
             }
             .buttonStyle(.bordered)
             .disabled(!canConfirm || isBusy)
-            Button("按当前作答重新判定", action: onRegrade)
+            Button("按当前文字重新生成标答", action: onRegrade)
                 .font(.subheadline)
                 .disabled(isBusy)
         }

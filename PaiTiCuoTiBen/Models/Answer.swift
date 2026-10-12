@@ -16,11 +16,10 @@ final class Answer {
         self.question = nil
     }
 
-    /// `user_confirmed ?? raw_ocr`, treating blank confirmation as absent.
+    /// `user_confirmed ?? raw_ocr`. A cleared confirmation stays empty so a misread answer can be removed.
     var snapshotText: String {
         if let userConfirmed {
-            let trimmed = userConfirmed.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { return trimmed }
+            return userConfirmed.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return rawOCR
     }

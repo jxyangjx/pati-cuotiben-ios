@@ -30,6 +30,7 @@ struct ImportView: View {
     @State private var replacementItem: PhotosPickerItem?
     @State private var working = false
     @State private var errorMessage: String?
+    @State private var skipNotice: SkipNotice?
 
     private var job: LocalJob? { jobs.first { $0.id == jobID } }
 
@@ -44,6 +45,18 @@ struct ImportView: View {
         .navigationTitle("导入页面")
         .navigationBarTitleDisplayMode(.inline)
         .flowErrorAlert($errorMessage)
+        .alert(
+            "有页面被跳过",
+            isPresented: Binding(
+                get: { skipNotice != nil },
+                set: { if !$0 { skipNotice = nil } }
+            ),
+            presenting: skipNotice
+        ) { _ in
+            Button("继续核对", action: onReady)
+        } message: { notice in
+            Text(notice.text)
+        }
         .sheet(isPresented: $showCamera) {
             CameraPicker { data in
                 guard let job else { return }
@@ -90,7 +103,7 @@ struct ImportView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(job.sortedPages.isEmpty || working)
                 if working {
-                    ProgressView("正在生成本地卡片")
+                    ProgressView("正在识别本机上的印刷文字")
                         .font(.caption)
                 } else if job.sortedPages.isEmpty {
                     Text("至少需要一页。")
@@ -162,7 +175,7 @@ struct ImportView: View {
 
     private func pagesCard(_ job: LocalJob) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeading(title: "页面", subtitle: "按阅读顺序排列。可以重拍、替换或删掉某一页。")
+            SectionHeading(title: "页面", subtitle: "按阅读顺序排列。识别只读取保存在本机的印刷文字。可以重拍、替换或删掉某一页。")
             HStack {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     Button {
@@ -301,14 +314,21 @@ struct ImportView: View {
         working = true
         Task {
             do {
-                try await JobPipeline.mockParse(
+                let outcome = try await JobPipeline.recognizePages(
                     job: job,
                     context: context,
                     inference: session.inference,
                     threshold: lockThreshold
                 )
                 working = false
-                onReady()
+                if outcome.emptyPageNumbers.isEmpty {
+                    onReady()
+                } else {
+                    let pages = outcome.emptyPageNumbers.map(String.init).joined(separator: "、")
+                    let text = "第 \(pages) 页没有识别到印刷文字，已跳过。其余页面已生成题目卡片。"
+                    session.notice = text
+                    skipNotice = SkipNotice(text: text)
+                }
             } catch {
                 working = false
                 errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -348,6 +368,11 @@ struct ImportView: View {
         }
         return types
     }
+}
+
+private struct SkipNotice: Identifiable {
+    let id = UUID()
+    let text: String
 }
 
 struct CameraPicker: UIViewControllerRepresentable {

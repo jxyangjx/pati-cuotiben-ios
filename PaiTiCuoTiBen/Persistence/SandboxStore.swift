@@ -105,6 +105,43 @@ enum SandboxStore {
         return (relativePath, jpeg.width, jpeg.height)
     }
 
+    /// Crops a local page JPEG. Nearly full-page or tiny boxes fall back to a copy of the page.
+    static func cropJPEG(from sourcePath: String, normalizedTopLeft rect: CGRect, destination: String) throws {
+        let clamped = PrintedQuestionSegmenter.clampUnit(rect)
+        let nearlyFull = clamped.width >= 0.98 && clamped.height >= 0.98
+        let tooSmall = clamped.width < 0.02 || clamped.height < 0.02
+        if nearlyFull || tooSmall {
+            try copyFile(from: sourcePath, to: destination)
+            return
+        }
+        guard let image = loadUIImage(relativePath: sourcePath) else { throw SandboxError.unreadableImage }
+        let crop = CGRect(
+            x: clamped.origin.x * image.size.width,
+            y: clamped.origin.y * image.size.height,
+            width: clamped.width * image.size.width,
+            height: clamped.height * image.size.height
+        ).integral
+        guard crop.width >= 1, crop.height >= 1 else {
+            try copyFile(from: sourcePath, to: destination)
+            return
+        }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: crop.size, format: format)
+        let rendered = renderer.image { _ in
+            image.draw(
+                in: CGRect(
+                    x: -crop.origin.x,
+                    y: -crop.origin.y,
+                    width: image.size.width,
+                    height: image.size.height
+                )
+            )
+        }
+        guard let data = rendered.jpegData(compressionQuality: 0.72) else { throw SandboxError.unreadableImage }
+        try write(data, relativePath: destination)
+    }
+
     static func copyFile(from sourcePath: String, to destinationPath: String) throws {
         let source = url(relativePath: sourcePath)
         let destination = url(relativePath: destinationPath)

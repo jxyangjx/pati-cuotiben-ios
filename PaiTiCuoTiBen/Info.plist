@@ -9,9 +9,9 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.education</string>
 	<key>NSCameraUsageDescription</key>
-	<string>用于拍摄作业和试卷。照片只保存在这台手机上。</string>
+	<string>仅用于本人作业整理。用于拍摄作业和试卷，照片只保存在这台手机上。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>用于从相册导入作业页面。照片只保存在这台手机上。</string>
+	<string>仅用于本人作业整理。用于从相册导入作业页面，照片只保存在这台手机上。</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

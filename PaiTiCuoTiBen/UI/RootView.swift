@@ -5,6 +5,7 @@ struct RootView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \Child.createdAt) private var children: [Child]
     @AppStorage(DefaultsKey.currentChildID) private var currentChildID = ""
+    @AppStorage(DefaultsKey.privacyConsentAccepted) private var privacyConsentAccepted = false
     @StateObject private var session = AppSession()
 
     private var activeChildren: [Child] {
@@ -13,7 +14,11 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if activeChildren.isEmpty {
+            if !privacyConsentAccepted {
+                PrivacyConsentView {
+                    privacyConsentAccepted = true
+                }
+            } else if activeChildren.isEmpty {
                 ChildGateView()
             } else {
                 MainTabView()
