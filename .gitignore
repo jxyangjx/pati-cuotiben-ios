@@ -11,3 +11,5 @@ xcuserdata/
 .swiftpm/
 .env
 gateway/.env
+__pycache__/
+*.pyc
