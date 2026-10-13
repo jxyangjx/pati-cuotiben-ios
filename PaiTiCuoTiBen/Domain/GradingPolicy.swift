@@ -58,6 +58,7 @@ enum GradingPolicy {
         adoption: CanonicalAdoption,
         verdictOverride: VerdictResult?,
         userHoldPending: Bool,
+        suppressAutoLock: Bool = false,
         threshold: Double = defaultLockThreshold
     ) -> GradingDecision {
         let canonicalText = canonical.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -109,6 +110,7 @@ enum GradingPolicy {
             && !stepsNeedReview
             && !studentEmpty
             && !userHoldPending
+            && !suppressAutoLock
             && grade.result != .pending
             && grade.confidence >= threshold
             && suggestedCanLock

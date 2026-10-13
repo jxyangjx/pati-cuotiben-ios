@@ -55,6 +55,13 @@ def system_prompt(kind: str) -> str:
         "error-analysis": {
             "points": ["1 到 3 条错因"],
             "avoidance_tips": ["避坑建议"],
+            "tags": ["计算错误"],
+        },
+        "similar": {
+            "items": [
+                {"stem": "变式题干", "answer": "可选答案", "source": "generated"},
+                {"stem": "第二道变式", "source": "generated"},
+            ]
         },
         "summary-groups": {
             "groups": [
@@ -149,7 +156,26 @@ def coerce(kind: str, data: dict) -> dict:
         tips = _strings(data.get("avoidance_tips"), 4)
         if not points or not tips:
             raise GatewayError(502, "invalid_model_json")
-        return {"points": points, "avoidance_tips": tips}
+        return {"points": points, "avoidance_tips": tips, "tags": _strings(data.get("tags"), 3)}
+    if kind == "similar":
+        raw_items = data.get("items") if isinstance(data.get("items"), list) else []
+        items = []
+        for raw in raw_items:
+            if not isinstance(raw, dict):
+                continue
+            stem = str(raw.get("stem") or "").strip()
+            if not stem:
+                continue
+            row = {"stem": stem, "source": "generated"}
+            answer = str(raw.get("answer") or "").strip()
+            if answer:
+                row["answer"] = answer
+            items.append(row)
+            if len(items) == 3:
+                break
+        if len(items) < 2:
+            raise GatewayError(502, "invalid_model_json")
+        return {"items": items}
     if kind == "summary-groups":
         raw_groups = data.get("groups") if isinstance(data.get("groups"), list) else []
         groups = []

@@ -41,6 +41,7 @@ enum BackupExporter {
         var order: Int
         var imageRelativePath: String
         var purged: Bool
+        var role: String
     }
 
     struct QuestionRecord: Codable {
@@ -64,6 +65,9 @@ enum BackupExporter {
         var verdict: String
         var verdictAuthority: String
         var verdictLocked: Bool
+        var questionNumber: String
+        var alignmentStatus: String
+        var alignmentCode: String
     }
 
     struct WrongRecord: Codable {
@@ -82,6 +86,7 @@ enum BackupExporter {
         var analysisStatus: String
         var points: [String]
         var avoidanceTips: [String]
+        var errorTags: [String]
         var createdAt: String
     }
 
@@ -108,7 +113,8 @@ enum BackupExporter {
                     id: page.id.uuidString,
                     order: page.order,
                     imageRelativePath: page.imageRelativePath,
-                    purged: page.purged
+                    purged: page.purged,
+                    role: page.roleRaw
                 )
             }
             let questions = job.sortedQuestions.map { question in
@@ -133,7 +139,10 @@ enum BackupExporter {
                     sourceRefs: question.canonicalAnswer?.sourceRefs ?? [],
                     verdict: question.verdict?.resultRaw ?? VerdictResult.pending.rawValue,
                     verdictAuthority: question.verdict?.authorityRaw ?? VerdictAuthority.none.rawValue,
-                    verdictLocked: question.verdict?.locked ?? false
+                    verdictLocked: question.verdict?.locked ?? false,
+                    questionNumber: question.questionNumber,
+                    alignmentStatus: question.alignmentStatusRaw,
+                    alignmentCode: question.alignmentCodeRaw
                 )
             }
             return JobRecord(
@@ -171,6 +180,7 @@ enum BackupExporter {
                 analysisStatus: item.analysisStatusRaw,
                 points: item.points,
                 avoidanceTips: item.avoidanceTips,
+                errorTags: item.errorTags,
                 createdAt: iso(item.createdAt)
             )
         }
@@ -186,7 +196,7 @@ enum BackupExporter {
 
         let document = Document(
             format: "paiticuotiben.backup",
-            version: 1,
+            version: 2,
             exportedAt: stamp,
             note: "拍题错题本本机备份。卸载 App 或清除数据后，需要靠这份备份自行留存。备份里没有云端对象存储链接。",
             children: childRecords,

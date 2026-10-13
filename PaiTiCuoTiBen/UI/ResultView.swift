@@ -89,6 +89,11 @@ struct ResultView: View {
                 Spacer()
                 StatusChip(title: verdict.title, color: Theme.color(for: verdict))
             }
+            if let summary = question.alignmentSummary {
+                Text(summary)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(question.alignmentStatus == .failed ? Theme.pending : .secondary)
+            }
             Text(question.stemText)
                 .font(.subheadline)
             AnswerComparison(
@@ -122,6 +127,10 @@ struct ResultView: View {
                 }
                 ForEach(Array(item.avoidanceTips.enumerated()), id: \.offset) { _, tip in
                     Text("避坑 · \(tip)")
+                        .font(.footnote)
+                }
+                if !item.errorTags.isEmpty {
+                    Text("错因标签 · \(item.errorTags.joined(separator: "、"))")
                         .font(.footnote)
                 }
             } else if item.analysisStatus == .failed {

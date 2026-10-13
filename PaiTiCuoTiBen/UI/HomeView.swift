@@ -126,7 +126,7 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(child.name)
                     .font(.title2.weight(.semibold))
-                Text("\(child.grade.rawValue) · 模式 A · 本机保存")
+                Text("\(child.grade.rawValue) · 本机保存")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -140,7 +140,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeading(
                 title: "整理一份作业",
-                subtitle: "一次导入多页。题目和手写答案在同一页，系统先给出标答，你再核对。"
+                subtitle: "一次导入多页。同页作答用模式 A，题目页加答题卡用模式 B。系统先给出标答，你再核对。"
             )
             Button(action: startImport) {
                 Label("开始导入", systemImage: "doc.viewfinder")
@@ -174,7 +174,7 @@ struct HomeView: View {
                 Spacer()
                 StatusChip(title: job.status.title, color: Theme.accent)
             }
-            Text("\(job.createdAt.chineseStamp) · \(job.sortedPages.count) 页 · \(job.sortedQuestions.count) 题")
+            Text("\(job.mode.title) · \(job.createdAt.chineseStamp) · \(job.sortedPages.count) 页 · \(job.sortedQuestions.count) 题")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             HStack {

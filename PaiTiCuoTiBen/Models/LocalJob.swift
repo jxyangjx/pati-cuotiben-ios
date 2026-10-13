@@ -8,12 +8,15 @@ final class LocalJob {
     var gradeRaw: String
     var subjectRaw: String
     var answerContextRaw: String
-    /// Phase 1 persists mode A only.
+    /// `A` is the same-page flow. `B` aligns question sheets with answer sheets.
     var modeRaw: String
     var statusRaw: String
     var teacherKeyRelativePath: String?
     var teacherKeyFilename: String?
     var teacherKeyFormatRaw: String?
+    var teacherKeyStatusRaw: String = ""
+    var teacherKeyPlainText: String = ""
+    var teacherKeyNote: String = ""
     var createdAt: Date
     var updatedAt: Date
     var child: Child?
@@ -41,6 +44,9 @@ final class LocalJob {
         self.teacherKeyRelativePath = nil
         self.teacherKeyFilename = nil
         self.teacherKeyFormatRaw = nil
+        self.teacherKeyStatusRaw = ""
+        self.teacherKeyPlainText = ""
+        self.teacherKeyNote = ""
         self.createdAt = createdAt
         self.updatedAt = createdAt
         self.child = nil
@@ -63,7 +69,10 @@ final class LocalJob {
         set { answerContextRaw = newValue.rawValue }
     }
 
-    var mode: JobMode { JobMode(rawValue: modeRaw) ?? .a }
+    var mode: JobMode {
+        get { JobMode(rawValue: modeRaw) ?? .a }
+        set { modeRaw = newValue.rawValue }
+    }
 
     var status: JobStatus {
         get { JobStatus.resolve(statusRaw) }
@@ -73,6 +82,19 @@ final class LocalJob {
     var teacherKeyFormat: TeacherKeyFormat? {
         get { teacherKeyFormatRaw.flatMap(TeacherKeyFormat.init(rawValue:)) }
         set { teacherKeyFormatRaw = newValue?.rawValue }
+    }
+
+    var teacherKeyStatus: TeacherKeyStatus {
+        get { TeacherKeyStatus.resolve(teacherKeyStatusRaw) }
+        set { teacherKeyStatusRaw = newValue.rawValue }
+    }
+
+    var alignmentSuccessCount: Int {
+        questions.filter { $0.alignmentStatus == .matched }.count
+    }
+
+    var alignmentFailureCount: Int {
+        questions.filter { $0.alignmentStatus == .failed }.count
     }
 
     var sortedPages: [Page] {

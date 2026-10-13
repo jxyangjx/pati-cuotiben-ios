@@ -68,9 +68,92 @@ enum AnswerContext: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-enum JobMode: String, Codable {
+enum JobMode: String, Codable, CaseIterable, Identifiable {
     /// Question and handwritten answer on the same page.
     case a = "A"
+    /// Question sheets plus a separate answer sheet, aligned by question number.
+    case b = "B"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .a: "模式 A · 同页作答"
+        case .b: "模式 B · 答题卡"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .a:
+            "题目和手写答案在同一页。"
+        case .b:
+            "先导入题目页，再导入答题卡。系统按题号对齐；对不齐的题留在待确认，可以手改题号。"
+        }
+    }
+}
+
+enum PageRole: String, Codable, CaseIterable, Identifiable {
+    case questionSheet
+    case answerSheet
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .questionSheet: "题目页"
+        case .answerSheet: "答题卡"
+        }
+    }
+
+    static func resolve(_ raw: String) -> PageRole {
+        PageRole(rawValue: raw) ?? .questionSheet
+    }
+}
+
+enum AlignmentStatus: String, Codable {
+    case matched
+    case failed
+
+    var title: String {
+        switch self {
+        case .matched: "对齐成功"
+        case .failed: "对齐失败"
+        }
+    }
+}
+
+enum AlignmentCode: String, Codable {
+    case missingAnswer
+    case missingQuestion
+    case ambiguousNumber
+    case unreadable
+
+    var message: String {
+        switch self {
+        case .missingAnswer: "题目缺作答"
+        case .missingQuestion: "答题卡多出题号"
+        case .ambiguousNumber: "题号冲突，请手改"
+        case .unreadable: "识别为空，请手改"
+        }
+    }
+}
+
+enum QuestionOrigin: String, Codable {
+    case questionSheet
+    case answerSheet
+    case both
+}
+
+enum TeacherKeyStatus: String, Codable {
+    case none
+    case pending
+    case parsed
+    case failed
+
+    static func resolve(_ raw: String) -> TeacherKeyStatus {
+        TeacherKeyStatus(rawValue: raw) ?? .none
+    }
 }
 
 enum JobStatus: String, Codable {
@@ -228,6 +311,18 @@ enum AnalysisText {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
+
+    static func tags(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var cleaned: [String] = []
+        for value in values {
+            let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, seen.insert(text).inserted else { continue }
+            cleaned.append(text)
+            if cleaned.count == 3 { break }
+        }
+        return cleaned
+    }
 }
 
 enum AppError: LocalizedError, Equatable {
@@ -236,6 +331,7 @@ enum AppError: LocalizedError, Equatable {
     case missingChild
     case missingJob
     case noPages
+    case modeBNeedsBoth
     case teacherKeyFormat
     case teacherKeyTooLarge
     case missingCanonical
@@ -258,6 +354,8 @@ enum AppError: LocalizedError, Equatable {
             "找不到这次作业。"
         case .noPages:
             "请至少导入一页作业。"
+        case .modeBNeedsBoth:
+            "模式 B 需要至少一页题目页，以及一页答题卡。"
         case .teacherKeyFormat:
             "这份老师标答格式无法识别。请改用 docx 或图片。"
         case .teacherKeyTooLarge:

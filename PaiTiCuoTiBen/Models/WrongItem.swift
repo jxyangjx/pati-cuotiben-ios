@@ -18,6 +18,12 @@ final class WrongItem {
     var analysisStatusRaw: String
     var pointsJSON: String
     var avoidanceTipsJSON: String
+    /// Refined error-cause tags, at most three. Empty until analysis is ready.
+    var errorTagsJSON: String = "[]"
+    /// `{items:[{stem,answer?,source:"generated"}], generatedAt}` for this item, type, and locale.
+    var similarCacheJSON: String = ""
+    /// `wrongItemId|questionType|locale`. A mismatch means the JSON cache is stale.
+    var similarCacheKey: String = ""
     var createdAt: Date
     var child: Child?
 
@@ -48,6 +54,9 @@ final class WrongItem {
         self.analysisStatusRaw = AnalysisStatus.pending.rawValue
         self.pointsJSON = JSONList.encode([])
         self.avoidanceTipsJSON = JSONList.encode([])
+        self.errorTagsJSON = JSONList.encode([])
+        self.similarCacheJSON = ""
+        self.similarCacheKey = ""
         self.createdAt = Date()
         self.child = nil
     }
@@ -80,5 +89,10 @@ final class WrongItem {
     var avoidanceTips: [String] {
         get { JSONList.decode(avoidanceTipsJSON) }
         set { avoidanceTipsJSON = JSONList.encode(newValue) }
+    }
+
+    var errorTags: [String] {
+        get { JSONList.decode(errorTagsJSON) }
+        set { errorTagsJSON = JSONList.encode(newValue) }
     }
 }

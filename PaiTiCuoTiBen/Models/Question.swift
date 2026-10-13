@@ -19,6 +19,13 @@ final class Question {
     var cropY: Double
     var cropWidth: Double
     var cropHeight: Double
+    /// Printed question number. Empty when the page had no Arabic marker.
+    var questionNumber: String = ""
+    /// Empty in mode A. Mode B sets `matched` or `failed`.
+    var alignmentStatusRaw: String = ""
+    var alignmentCodeRaw: String = ""
+    /// Which sheet produced this card: question, answer, or both.
+    var originRaw: String = ""
     var job: LocalJob?
 
     @Relationship(deleteRule: .cascade, inverse: \Answer.question)
@@ -51,9 +58,39 @@ final class Question {
         self.cropY = crop.origin.y
         self.cropWidth = crop.width
         self.cropHeight = crop.height
+        self.questionNumber = ""
+        self.alignmentStatusRaw = ""
+        self.alignmentCodeRaw = ""
+        self.originRaw = ""
         self.job = nil
         self.answer = nil
         self.canonicalAnswer = nil
         self.verdict = nil
+    }
+
+    var alignmentStatus: AlignmentStatus? {
+        get { alignmentStatusRaw.isEmpty ? nil : AlignmentStatus(rawValue: alignmentStatusRaw) }
+        set { alignmentStatusRaw = newValue?.rawValue ?? "" }
+    }
+
+    var alignmentCode: AlignmentCode? {
+        get { alignmentCodeRaw.isEmpty ? nil : AlignmentCode(rawValue: alignmentCodeRaw) }
+        set { alignmentCodeRaw = newValue?.rawValue ?? "" }
+    }
+
+    var origin: QuestionOrigin? {
+        get { originRaw.isEmpty ? nil : QuestionOrigin(rawValue: originRaw) }
+        set { originRaw = newValue?.rawValue ?? "" }
+    }
+
+    var alignmentSummary: String? {
+        switch alignmentStatus {
+        case .matched:
+            return "对齐成功"
+        case .failed:
+            return alignmentCode?.message ?? AlignmentStatus.failed.title
+        case nil:
+            return nil
+        }
     }
 }

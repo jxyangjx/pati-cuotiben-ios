@@ -225,5 +225,184 @@ final class DomainTests: XCTestCase {
         XCTAssertEqual(groups[0].wrongCount, 1)
         XCTAssertEqual(groups[0].pendingCount, 1)
         XCTAssertEqual(groups[0].correctCount, 0)
+        XCTAssertEqual(analysis.tags, ["计算错误"])
+
+        let variants = try await client.similar(
+            SimilarQuestionRequest(
+                stemText: "计算：1 + 1 = ?",
+                canonicalText: "2",
+                questionType: "计算题",
+                subject: "数学",
+                locale: "zh-Hans"
+            )
+        )
+        XCTAssertGreaterThanOrEqual(variants.items.count, 2)
+        XCTAssertLessThanOrEqual(variants.items.count, 3)
+        XCTAssertTrue(variants.items.allSatisfy { $0.source == "generated" })
+    }
+
+    func testAlignmentFailureDoesNotAutoLock() {
+        let decision = GradingPolicy.decide(
+            student: "3",
+            canonical: "2",
+            steps: ["1 加 1 得 2。"],
+            questionType: "计算题",
+            canonicalConfidence: 0.93,
+            grade: GradeSignal(result: .wrong, confidence: 0.91, suggestedAuthority: .autoObjective),
+            adoption: .none,
+            verdictOverride: nil,
+            userHoldPending: false,
+            suppressAutoLock: true
+        )
+        XCTAssertEqual(decision.verdict, .pending)
+        XCTAssertFalse(decision.locked)
+        XCTAssertFalse(decision.canEnterWrongBook)
+        XCTAssertEqual(decision.verdictAuthority, .none)
+    }
+
+    func testModeBAlignmentCodes() {
+        let questions = [
+            segment("1. 计算：1 + 1 = ?", page: 1),
+            segment("2. 说明题意", page: 1),
+            segment("2. 另一道题", page: 1),
+            segment("没有题号的一行", page: 1),
+        ]
+        let answers = [
+            answer("1. 3✓", page: 2),
+            answer("4. B", page: 2),
+            answer("4. C", page: 2),
+        ]
+        let aligned = SheetAligner.align(questions: questions, answers: answers)
+        let matched = aligned.first { $0.questionNumber == "1" && $0.status == .matched }
+        XCTAssertEqual(matched?.studentAnswer, "3✓")
+        XCTAssertEqual(matched?.markHint, MarkHints.unreliable)
+        XCTAssertEqual(matched?.code, nil)
+        XCTAssertEqual(aligned.filter { $0.code == .ambiguousNumber }.count, 4)
+        XCTAssertTrue(aligned.contains { $0.code == .missingQuestion && $0.questionNumber == "4" || $0.code == .ambiguousNumber && $0.questionNumber == "4" })
+        XCTAssertTrue(aligned.contains { $0.code == .unreadable })
+        XCTAssertFalse(aligned.contains { $0.status == .matched && $0.questionNumber == "2" })
+
+        let repaired = SheetAligner.realign([
+            RealignCard(number: "1", stem: "1. 计算：1 + 1 = ?", answer: "3", origin: .questionSheet),
+            RealignCard(number: "2", stem: AlignmentCopy.missingQuestionStem, answer: "B", origin: .answerSheet),
+            RealignCard(number: "1", stem: "重复", answer: "4", origin: .questionSheet),
+        ])
+        XCTAssertEqual(repaired[0].code, .ambiguousNumber)
+        XCTAssertEqual(repaired[1].code, .missingQuestion)
+        XCTAssertEqual(repaired[2].code, .ambiguousNumber)
+
+        let unique = SheetAligner.realign([
+            RealignCard(number: "01", stem: "1. 计算：1 + 1 = ?", answer: "3", origin: .both),
+        ])
+        XCTAssertEqual(unique[0].status, .matched)
+        XCTAssertNil(unique[0].code)
+    }
+
+    func testTeacherDocxAlignsFinalAnswerOnly() throws {
+        let stored = ZipStore.archive(entries: [
+            ZipStore.Entry(
+                name: "word/document.xml",
+                data: Data(
+                    """
+                    <w:document><w:p><w:r><w:t>1. 9</w:t></w:r></w:p><w:p><w:r><w:t>步骤不要拿来当答案</w:t></w:r></w:p></w:document>
+                    """.utf8
+                )
+            ),
+        ])
+        let parsed = TeacherKeyText.inspect(format: .docx, data: stored)
+        XCTAssertEqual(parsed.status, .parsed)
+        let answers = TeacherAnswerAligner.map(from: parsed.text)
+        XCTAssertEqual(answers["1"], "9\n步骤不要拿来当答案")
+        let text = TeacherAnswerAligner.alignedText(
+            systemText: "2",
+            questionNumber: "1",
+            answers: answers,
+            plainText: parsed.text,
+            soleQuestion: false
+        )
+        XCTAssertEqual(text, "9\n步骤不要拿来当答案")
+        let steps = ["1 加 1 得 2。"]
+        XCTAssertEqual(steps, ["1 加 1 得 2。"])
+
+        let deflated = Data(hex: """
+        504b03041400000008003d174d5dff18e6d5690000008500000011000000776f72642f646f63756d656e742e786d6c35cd5d0a83301004e0ab8807706d1f0a0d69ee1262aa82fbc3ee96f4f835425f3e669887892d2c5c3e58c9872f1e64a1bdc6cd5d028095ad62b689a5d2b9bd5931fb597585c6ba8872a9663bad78c07d9e1f8079a731c516a4a31d4fb7697846e8a9ab9772f93f4e3f504b010214031400000008003d174d5dff18e6d56900000085000000110000000000000000000000800100000000776f72642f646f63756d656e742e786d6c504b050600000000010001003f000000980000000000
+        """)
+        let inflated = TeacherKeyText.inspect(format: .docx, data: deflated)
+        XCTAssertEqual(inflated.status, .parsed)
+        XCTAssertEqual(TeacherAnswerAligner.map(from: inflated.text)["1"], "9")
+
+        let legacy = TeacherKeyText.inspect(format: .doc, data: Data("binary".utf8))
+        XCTAssertEqual(legacy.status, .failed)
+        XCTAssertTrue(legacy.note.contains("docx"))
+        let garbage = TeacherKeyText.inspect(format: .docx, data: Data("teacher".utf8))
+        XCTAssertEqual(garbage.status, .failed)
+    }
+
+    func testVariantCacheAndRadarDoNotInventRows() {
+        XCTAssertEqual(WeaknessRadar.emptyMessage, "完成几次核对后才会出现薄弱项")
+        XCTAssertTrue(WeaknessRadar.slices(subjects: [], questionTypes: [], errorTags: []).isEmpty)
+        let slices = WeaknessRadar.slices(
+            subjects: ["数学", "数学"],
+            questionTypes: ["计算题"],
+            errorTags: ["计算错误", "计算错误", "审题偏差"]
+        )
+        XCTAssertEqual(slices.first { $0.kind == .subject && $0.label == "数学" }?.count, 2)
+        XCTAssertEqual(slices.first { $0.kind == .errorTag && $0.label == "计算错误" }?.count, 2)
+        XCTAssertFalse(slices.contains { $0.label == "KnowledgeStat" })
+
+        let id = UUID()
+        let key = SimilarCacheFile.key(wrongItemID: id, questionType: "计算题", locale: "zh-Hans")
+        XCTAssertTrue(key.contains(id.uuidString))
+        XCTAssertTrue(key.contains("计算题"))
+        XCTAssertTrue(key.contains("zh-Hans"))
+        let file = SimilarCacheFile(
+            items: [
+                SimilarCacheItem(stem: "计算：2 + 3 = ?", answer: "5", source: "generated"),
+                SimilarCacheItem(stem: "重述这道题", answer: nil, source: "generated"),
+            ],
+            generatedAt: "2026-10-13T00:00:00Z"
+        )
+        let decoded = SimilarCacheFile.decode(file.encode())
+        XCTAssertEqual(decoded?.items.count, 2)
+        XCTAssertEqual(decoded?.items[0].answer, "5")
+        XCTAssertNil(decoded?.items[1].answer)
+        XCTAssertEqual(decoded?.items[0].source, "generated")
+        XCTAssertEqual(decoded?.generatedAt, "2026-10-13T00:00:00Z")
+        XCTAssertEqual(VariantPractice.check(attempt: "6", answer: "5"), .incorrect)
+        XCTAssertEqual(VariantPractice.check(attempt: "5", answer: "5"), .correct)
+        XCTAssertEqual(VariantPractice.check(attempt: "任意", answer: nil), .ungraded)
+    }
+
+    private func segment(_ text: String, page: Int) -> SheetSegment {
+        SheetAligner.questionSegment(
+            stem: text,
+            crop: CGRect(x: 0, y: 0, width: 1, height: 1),
+            confidence: 0.9,
+            pageID: UUID(uuidString: "00000000-0000-0000-0000-00000000000\(page)")!
+        )
+    }
+
+    private func answer(_ text: String, page: Int) -> SheetSegment {
+        SheetAligner.answerSegment(
+            block: text,
+            crop: CGRect(x: 0, y: 0, width: 1, height: 1),
+            confidence: 0.9,
+            pageID: UUID(uuidString: "00000000-0000-0000-0000-00000000000\(page)")!
+        )
+    }
+}
+
+private extension Data {
+    init(hex: String) {
+        var data = Data()
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 2)
+            if let byte = UInt8(hex[index..<next], radix: 16) {
+                data.append(byte)
+            }
+            index = next
+        }
+        self = data
     }
 }

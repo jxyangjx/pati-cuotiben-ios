@@ -44,6 +44,10 @@ struct HTTPInferenceClient: InferenceClient {
         return envelope.groups
     }
 
+    func similar(_ request: SimilarQuestionRequest) async throws -> SimilarQuestionResponse {
+        try await post(InferencePath.similar, body: request, as: SimilarQuestionResponse.self)
+    }
+
     private func post<Body: Encodable, Response: Decodable>(
         _ path: String,
         body: Body,
@@ -100,6 +104,10 @@ struct UnavailableInferenceClient: InferenceClient {
     }
 
     func summaryGroups(_ request: SummaryGroupsRequest) async throws -> [SummaryGroup] {
+        throw AppError.inferenceUnavailable
+    }
+
+    func similar(_ request: SimilarQuestionRequest) async throws -> SimilarQuestionResponse {
         throw AppError.inferenceUnavailable
     }
 }

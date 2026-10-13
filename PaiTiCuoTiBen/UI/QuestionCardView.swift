@@ -3,19 +3,27 @@ import SwiftUI
 struct QuestionCardView: View {
     @Bindable var question: Question
     var isBusy: Bool
+    var showsAlignment: Bool = false
     var onCanonicalEdited: () -> Void
     var onConfirmCanonical: () -> Void
     var onMarkCorrect: () -> Void
     var onMarkWrong: () -> Void
     var onMarkPending: () -> Void
     var onRegrade: () -> Void
+    var onRealign: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("第 \(question.order + 1) 题")
+                Text(showsAlignment && !question.questionNumber.isEmpty ? "题号 \(question.questionNumber)" : "第 \(question.order + 1) 题")
                     .font(.headline)
                 Spacer()
+                if let summary = question.alignmentSummary {
+                    StatusChip(
+                        title: summary,
+                        color: question.alignmentStatus == .matched ? Theme.correct : Theme.pending
+                    )
+                }
                 Text(question.questionType)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -26,6 +34,10 @@ struct QuestionCardView: View {
 
             if question.cropRelativePath != nil {
                 SandboxImage(relativePath: question.cropRelativePath, height: 140)
+            }
+
+            if showsAlignment {
+                alignmentSection
             }
 
             Text("题干")
@@ -57,6 +69,23 @@ struct QuestionCardView: View {
             }
         }
         .cardChrome()
+    }
+
+    private var alignmentSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("题号")
+                .font(.subheadline.weight(.semibold))
+            TextField("题号", text: $question.questionNumber)
+                .textFieldStyle(.roundedBorder)
+            if question.alignmentStatus == .failed {
+                Text("对齐失败，这题保持待确认。可以手改题号和作答，再重新对齐。")
+                    .font(.caption)
+                    .foregroundStyle(Theme.pending)
+            }
+            Button("按当前题号重新对齐", action: onRealign)
+                .font(.subheadline)
+                .disabled(isBusy)
+        }
     }
 
     private var studentSection: some View {

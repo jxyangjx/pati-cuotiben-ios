@@ -10,4 +10,5 @@ protocol InferenceClient: Sendable {
     func grade(_ request: GradeRequest) async throws -> GradeResponse
     func errorAnalysis(_ request: ErrorAnalysisRequest) async throws -> ErrorAnalysisResponse
     func summaryGroups(_ request: SummaryGroupsRequest) async throws -> [SummaryGroup]
+    func similar(_ request: SimilarQuestionRequest) async throws -> SimilarQuestionResponse
 }

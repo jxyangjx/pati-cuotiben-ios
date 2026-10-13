@@ -46,6 +46,10 @@
 		A0139D8C5BFB3254324ED59A /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77D20FB7693818F7DB0C2BD9 /* Theme.swift */; };
 		2DA1A8B0FD103DD71E7336F5 /* WrongBookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835BC7730E1FFF12110F3856 /* WrongBookView.swift */; };
 		8F11D0C6A4B29E37D5C81A42 /* PrintedQuestionSegmenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C0E9A21B7D35F68E1A24C90 /* PrintedQuestionSegmenter.swift */; };
+		A11A11A11A11A11A11A11A02 /* SheetAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11A11A11A11A11A11A11A01 /* SheetAligner.swift */; };
+		A11A11A11A11A11A11A11A04 /* TeacherKeyText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11A11A11A11A11A11A11A03 /* TeacherKeyText.swift */; };
+		A11A11A11A11A11A11A11A06 /* WeaknessRadar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11A11A11A11A11A11A11A05 /* WeaknessRadar.swift */; };
+		A11A11A11A11A11A11A11A08 /* SimilarCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11A11A11A11A11A11A11A07 /* SimilarCache.swift */; };
 		6A2F8C15D9E0473B1C6D5A28 /* VisionPageTextRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19E4B7A0C3D58F2614AB90E3 /* VisionPageTextRecognizer.swift */; };
 		9C3A6F12E8D0457B2A1C4E96 /* PrivacyConsentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D7B4E91A6C083F54E1B9D70 /* PrivacyConsentView.swift */; };
 		123C8D25CC7553A7137F5B2C /* DomainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6E06EA39B9EA82F58B39604 /* DomainTests.swift */; };
@@ -113,6 +117,10 @@
 		E6E06EA39B9EA82F58B39604 /* DomainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainTests.swift; sourceTree = "<group>"; };
 		0C8C90777FC33258B45399E2 /* JobPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobPipelineTests.swift; sourceTree = "<group>"; };
 		4C0E9A21B7D35F68E1A24C90 /* PrintedQuestionSegmenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintedQuestionSegmenter.swift; sourceTree = "<group>"; };
+		A11A11A11A11A11A11A11A01 /* SheetAligner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetAligner.swift; sourceTree = "<group>"; };
+		A11A11A11A11A11A11A11A03 /* TeacherKeyText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeacherKeyText.swift; sourceTree = "<group>"; };
+		A11A11A11A11A11A11A11A05 /* WeaknessRadar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeaknessRadar.swift; sourceTree = "<group>"; };
+		A11A11A11A11A11A11A11A07 /* SimilarCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimilarCache.swift; sourceTree = "<group>"; };
 		19E4B7A0C3D58F2614AB90E3 /* VisionPageTextRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionPageTextRecognizer.swift; sourceTree = "<group>"; };
 		2D7B4E91A6C083F54E1B9D70 /* PrivacyConsentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyConsentView.swift; sourceTree = "<group>"; };
 		5E8A1D34C7B0692F4A3E1C85 /* VisionOCRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionOCRTests.swift; sourceTree = "<group>"; };
@@ -145,6 +153,10 @@
 				AC3F7A5EE5C0F580A3AFAF2B /* JSONList.swift */,
 				EF7AC9A5837EE84EAE058EAE /* GradingPolicy.swift */,
 				4C0E9A21B7D35F68E1A24C90 /* PrintedQuestionSegmenter.swift */,
+				A11A11A11A11A11A11A11A01 /* SheetAligner.swift */,
+				A11A11A11A11A11A11A11A03 /* TeacherKeyText.swift */,
+				A11A11A11A11A11A11A11A05 /* WeaknessRadar.swift */,
+				A11A11A11A11A11A11A11A07 /* SimilarCache.swift */,
 			);
 			path = Domain;
 			sourceTree = "<group>";
@@ -413,6 +425,10 @@
 				A0139D8C5BFB3254324ED59A /* Theme.swift in Sources */,
 				2DA1A8B0FD103DD71E7336F5 /* WrongBookView.swift in Sources */,
 				8F11D0C6A4B29E37D5C81A42 /* PrintedQuestionSegmenter.swift in Sources */,
+				A11A11A11A11A11A11A11A02 /* SheetAligner.swift in Sources */,
+				A11A11A11A11A11A11A11A04 /* TeacherKeyText.swift in Sources */,
+				A11A11A11A11A11A11A11A06 /* WeaknessRadar.swift in Sources */,
+				A11A11A11A11A11A11A11A08 /* SimilarCache.swift in Sources */,
 				6A2F8C15D9E0473B1C6D5A28 /* VisionPageTextRecognizer.swift in Sources */,
 				9C3A6F12E8D0457B2A1C4E96 /* PrivacyConsentView.swift in Sources */,
 			);

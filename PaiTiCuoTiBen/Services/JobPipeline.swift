@@ -76,7 +76,12 @@ enum JobPipeline {
         return job
     }
 
-    static func addPage(job: LocalJob, imageData: Data, context: ModelContext) throws {
+    static func addPage(
+        job: LocalJob,
+        imageData: Data,
+        context: ModelContext,
+        role: PageRole = .questionSheet
+    ) throws {
         let pageID = UUID()
         let path = SandboxPath.page(childID: job.childID, jobID: job.id, pageID: pageID)
         let saved = try SandboxStore.saveJPEG(imageData, relativePath: path)
@@ -85,10 +90,42 @@ enum JobPipeline {
             order: job.pages.count,
             imageRelativePath: saved.path,
             pixelWidth: saved.width,
-            pixelHeight: saved.height
+            pixelHeight: saved.height,
+            role: role
         )
         context.insert(page)
         page.job = job
+        job.updatedAt = Date()
+        try context.save()
+    }
+
+    static func setMode(job: LocalJob, mode: JobMode, context: ModelContext) throws {
+        job.mode = mode
+        if mode == .a {
+            for page in job.pages {
+                page.role = .questionSheet
+            }
+        }
+        job.updatedAt = Date()
+        try context.save()
+    }
+
+    static func setPageRole(page: Page, job: LocalJob, role: PageRole, context: ModelContext) throws {
+        page.role = role
+        job.updatedAt = Date()
+        try context.save()
+    }
+
+    static func movePage(job: LocalJob, pageID: UUID, before targetID: UUID, context: ModelContext) throws {
+        var pages = job.sortedPages
+        guard let from = pages.firstIndex(where: { $0.id == pageID }) else { return }
+        guard pages.contains(where: { $0.id == targetID }), pageID != targetID else { return }
+        let moving = pages.remove(at: from)
+        let insertAt = pages.firstIndex(where: { $0.id == targetID }) ?? pages.endIndex
+        pages.insert(moving, at: insertAt)
+        for (order, page) in pages.enumerated() {
+            page.order = order
+        }
         job.updatedAt = Date()
         try context.save()
     }
@@ -148,9 +185,13 @@ enum JobPipeline {
             SandboxStore.remove(relativePath: previous)
         }
         try SandboxStore.write(data, relativePath: path)
+        let inspection = TeacherKeyText.inspect(format: format, data: data)
         job.teacherKeyRelativePath = path
         job.teacherKeyFilename = filename
         job.teacherKeyFormat = format
+        job.teacherKeyStatus = inspection.status
+        job.teacherKeyPlainText = inspection.text
+        job.teacherKeyNote = inspection.note
         job.updatedAt = Date()
         try context.save()
     }
@@ -160,6 +201,9 @@ enum JobPipeline {
         job.teacherKeyRelativePath = nil
         job.teacherKeyFilename = nil
         job.teacherKeyFormat = nil
+        job.teacherKeyStatus = .none
+        job.teacherKeyPlainText = ""
+        job.teacherKeyNote = ""
         job.updatedAt = Date()
         try context.save()
     }
@@ -175,29 +219,58 @@ enum JobPipeline {
         try PrivacyConsent.require()
         let pages = job.sortedPages
         guard !pages.isEmpty else { throw AppError.noPages }
+        if job.mode == .b {
+            let hasQuestions = pages.contains { $0.role == .questionSheet }
+            let hasAnswers = pages.contains { $0.role == .answerSheet }
+            guard hasQuestions, hasAnswers else { throw AppError.modeBNeedsBoth }
+        }
+
+        let teacher = try await loadTeacherContext(job: job, context: context, recognizer: recognizer)
+        let gathered = job.mode == .b
+            ? try await gatherModeB(pages: pages, recognizer: recognizer)
+            : try await gatherModeA(pages: pages, recognizer: recognizer)
+        guard !gathered.cards.isEmpty else { throw AppError.noPrintedText }
 
         var prepared: [PreparedQuestion] = []
-        var emptyPageNumbers: [Int] = []
-        for page in pages {
-            let drafts = try await drafts(on: page, recognizer: recognizer)
-            if drafts.isEmpty {
-                emptyPageNumbers.append(page.order + 1)
-                continue
-            }
-            for draft in drafts {
-                let solved = try await inference.solve(
-                    SolveRequest(
-                        stemText: draft.stem,
-                        studentAnswer: draft.studentAnswer,
-                        subject: job.subjectRaw,
-                        grade: job.gradeRaw,
-                        teacherKeyFilename: job.teacherKeyFilename
-                    )
+        for card in gathered.cards {
+            var solved = try await inference.solve(
+                SolveRequest(
+                    stemText: card.draft.stem,
+                    studentAnswer: card.draft.studentAnswer,
+                    subject: job.subjectRaw,
+                    grade: job.gradeRaw,
+                    teacherKeyFilename: job.teacherKeyFilename
                 )
-                prepared.append(PreparedQuestion(page: page, draft: draft, solved: solved))
-            }
+            )
+        let alignedText = TeacherAnswerAligner.alignedText(
+            systemText: solved.text,
+            questionNumber: card.number,
+            answers: teacher.answers,
+            plainText: teacher.plainText,
+            soleQuestion: gathered.cards.count == 1
+        )
+        solved = SolveResponse(
+            text: alignedText,
+            steps: solved.steps,
+            explanation: solved.explanation,
+            questionType: solved.questionType,
+            confidence: solved.confidence,
+            sourceRefs: solved.sourceRefs
+        )
+            prepared.append(
+                PreparedQuestion(
+                    page: card.page,
+                    draft: card.draft,
+                    solved: solved,
+                    questionNumber: card.number,
+                    alignmentStatus: card.alignment,
+                    alignmentCode: card.code,
+                    origin: card.origin,
+                    markHint: card.hint
+                )
+            )
         }
-        guard !prepared.isEmpty else { throw AppError.noPrintedText }
+        let emptyPageNumbers = gathered.empty
 
         for question in Array(job.questions) {
             try deleteWrongItems(sourceQuestionID: question.id, context: context)
@@ -296,7 +369,17 @@ enum JobPipeline {
                 teacherKeyFilename: job.teacherKeyFilename
             )
         )
-        canonical.text = solved.text
+        let teacherAnswers = job.teacherKeyStatus == .parsed
+            ? TeacherAnswerAligner.map(from: job.teacherKeyPlainText)
+            : [:]
+        let plain = job.teacherKeyStatus == .parsed ? job.teacherKeyPlainText : ""
+        canonical.text = TeacherAnswerAligner.alignedText(
+            systemText: solved.text,
+            questionNumber: question.questionNumber,
+            answers: teacherAnswers,
+            plainText: plain,
+            soleQuestion: job.questions.count == 1
+        )
         canonical.steps = solved.steps.isEmpty ? ["（步骤待补充）"] : solved.steps
         canonical.explanation = solved.explanation
         canonical.confidence = solved.confidence
@@ -372,6 +455,83 @@ enum JobPipeline {
         return count
     }
 
+    static func realign(
+        job: LocalJob,
+        context: ModelContext,
+        inference: any InferenceClient,
+        threshold: Double
+    ) async throws {
+        let questions = job.sortedQuestions
+        let results = SheetAligner.realign(
+            questions.map { question in
+                RealignCard(
+                    number: question.questionNumber,
+                    stem: question.stemText,
+                    answer: question.answer?.snapshotText ?? "",
+                    origin: question.origin ?? .questionSheet
+                )
+            }
+        )
+        for (question, result) in zip(questions, results) {
+            question.questionNumber = QuestionNumbers.normalize(question.questionNumber)
+            question.alignmentStatus = result.status
+            question.alignmentCode = result.code
+            let preserveUserLock = result.status == .matched
+                && question.verdict?.locked == true
+                && question.verdict?.authority == .userConfirm
+            try await regrade(
+                question: question,
+                job: job,
+                context: context,
+                inference: inference,
+                threshold: threshold,
+                adoption: preserveUserLock ? .user : (question.canonicalAnswer?.adoption ?? .none),
+                verdictOverride: preserveUserLock ? question.verdict?.result : nil,
+                userHoldPending: false
+            )
+        }
+    }
+
+    static func cachedSimilar(item: WrongItem, locale: String) -> SimilarCacheFile? {
+        let key = SimilarCacheFile.key(wrongItemID: item.id, questionType: item.questionType, locale: locale)
+        guard item.similarCacheKey == key else { return nil }
+        return SimilarCacheFile.decode(item.similarCacheJSON)
+    }
+
+    @discardableResult
+    static func generateSimilar(
+        item: WrongItem,
+        context: ModelContext,
+        inference: any InferenceClient,
+        locale: String,
+        replacingCache: Bool = false
+    ) async throws -> SimilarCacheFile {
+        if !replacingCache, let cached = cachedSimilar(item: item, locale: locale) {
+            return cached
+        }
+        let response = try await inference.similar(
+            SimilarQuestionRequest(
+                stemText: item.stemText,
+                canonicalText: item.canonicalText,
+                questionType: item.questionType,
+                subject: item.subjectRaw,
+                locale: locale
+            )
+        )
+        try Task.checkCancellation()
+        let normalized = Array(SimilarCacheFile.normalized(response.items).prefix(3))
+        guard normalized.count >= 2, normalized.count <= 3 else { throw AppError.inferenceFailed }
+        let file = SimilarCacheFile(items: normalized, generatedAt: isoTimestamp(Date()))
+        item.similarCacheKey = SimilarCacheFile.key(
+            wrongItemID: item.id,
+            questionType: item.questionType,
+            locale: locale
+        )
+        item.similarCacheJSON = file.encode()
+        try context.save()
+        return file
+    }
+
     static func markCompleted(job: LocalJob, context: ModelContext) throws {
         guard job.status == .reviewing else { return }
         job.status = .completed
@@ -428,6 +588,7 @@ enum JobPipeline {
             adoption: adoption,
             verdictOverride: verdictOverride,
             userHoldPending: userHoldPending,
+            suppressAutoLock: question.alignmentStatus == .failed,
             threshold: threshold
         )
         try await apply(
@@ -512,6 +673,10 @@ enum JobPipeline {
             || item.canonicalText != canonical.text
             || item.canonicalSteps != steps
             || item.stemText != question.stemText
+        if item.questionType != question.questionType {
+            item.similarCacheJSON = ""
+            item.similarCacheKey = ""
+        }
         item.subject = job.subject
         item.grade = job.grade
         item.questionType = question.questionType
@@ -524,6 +689,7 @@ enum JobPipeline {
             item.analysisStatus = .pending
             item.points = []
             item.avoidanceTips = []
+            item.errorTags = []
         }
         if let crop = question.cropRelativePath, SandboxStore.fileExists(relativePath: crop) {
             let destination = SandboxPath.wrongCrop(childID: job.childID, wrongItemID: item.id)
@@ -600,32 +766,176 @@ enum JobPipeline {
             let points = AnalysisText.points(response.points)
             let tips = AnalysisText.tips(response.avoidanceTips)
             guard !points.isEmpty, !tips.isEmpty else {
+                item.errorTags = []
                 item.analysisStatus = .failed
                 try? context.save()
                 return
             }
             item.points = points
             item.avoidanceTips = tips
+            item.errorTags = AnalysisText.tags(response.tags)
             item.analysisStatus = .ready
         } catch {
+            item.errorTags = []
             item.analysisStatus = .failed
         }
         try? context.save()
+    }
+
+    private struct TeacherContext {
+        var answers: [String: String]
+        var plainText: String
+    }
+
+    private struct GatheredCard {
+        var page: Page
+        var draft: QuestionDraft
+        var number: String
+        var alignment: AlignmentStatus?
+        var code: AlignmentCode?
+        var origin: QuestionOrigin
+        var hint: String?
     }
 
     private struct PreparedQuestion {
         var page: Page
         var draft: QuestionDraft
         var solved: SolveResponse
+        var questionNumber: String
+        var alignmentStatus: AlignmentStatus?
+        var alignmentCode: AlignmentCode?
+        var origin: QuestionOrigin
+        var markHint: String?
     }
 
-    private static func drafts(on page: Page, recognizer: any PageTextRecognizing) async throws -> [QuestionDraft] {
+    private static func loadTeacherContext(
+        job: LocalJob,
+        context: ModelContext,
+        recognizer: any PageTextRecognizing
+    ) async throws -> TeacherContext {
+        if job.teacherKeyFormat == .image, job.teacherKeyStatus != .parsed,
+           let path = job.teacherKeyRelativePath,
+           let data = SandboxStore.read(relativePath: path), !data.isEmpty {
+            let lines = (try? await recognizer.recognize(imageData: data)) ?? []
+            let inspection = TeacherKeyText.plainText(fromOCR: lines.map(\.text))
+            job.teacherKeyStatus = inspection.status
+            job.teacherKeyPlainText = inspection.text
+            job.teacherKeyNote = inspection.note
+            try context.save()
+        }
+        guard job.teacherKeyStatus == .parsed else {
+            return TeacherContext(answers: [:], plainText: "")
+        }
+        return TeacherContext(
+            answers: TeacherAnswerAligner.map(from: job.teacherKeyPlainText),
+            plainText: job.teacherKeyPlainText
+        )
+    }
+
+    private static func gatherModeA(
+        pages: [Page],
+        recognizer: any PageTextRecognizing
+    ) async throws -> (cards: [GatheredCard], empty: [Int]) {
+        var cards: [GatheredCard] = []
+        var empty: [Int] = []
+        for page in pages {
+            let pageDrafts = try await drafts(on: page, recognizer: recognizer, takingLastLineAsAnswer: true)
+            if pageDrafts.isEmpty {
+                empty.append(page.order + 1)
+                continue
+            }
+            for draft in pageDrafts {
+                cards.append(
+                    GatheredCard(
+                        page: page,
+                        draft: draft,
+                        number: QuestionNumbers.number(in: draft.stem) ?? "",
+                        alignment: nil,
+                        code: nil,
+                        origin: .questionSheet,
+                        hint: nil
+                    )
+                )
+            }
+        }
+        return (cards, empty)
+    }
+
+    private static func gatherModeB(
+        pages: [Page],
+        recognizer: any PageTextRecognizing
+    ) async throws -> (cards: [GatheredCard], empty: [Int]) {
+        var questions: [SheetSegment] = []
+        var answers: [SheetSegment] = []
+        var empty: [Int] = []
+        var pagesByID: [UUID: Page] = [:]
+        for page in pages where page.role == .questionSheet {
+            pagesByID[page.id] = page
+            let blocks = try await drafts(on: page, recognizer: recognizer, takingLastLineAsAnswer: false)
+            if blocks.isEmpty {
+                empty.append(page.order + 1)
+                continue
+            }
+            for block in blocks {
+                questions.append(
+                    SheetAligner.questionSegment(
+                        stem: block.stem,
+                        crop: block.crop,
+                        confidence: block.confidence,
+                        pageID: page.id
+                    )
+                )
+            }
+        }
+        for page in pages where page.role == .answerSheet {
+            pagesByID[page.id] = page
+            let blocks = try await drafts(on: page, recognizer: recognizer, takingLastLineAsAnswer: false)
+            if blocks.isEmpty {
+                empty.append(page.order + 1)
+                continue
+            }
+            for block in blocks {
+                answers.append(
+                    SheetAligner.answerSegment(
+                        block: block.stem,
+                        crop: block.crop,
+                        confidence: block.confidence,
+                        pageID: page.id
+                    )
+                )
+            }
+        }
+        let cards = SheetAligner.align(questions: questions, answers: answers).compactMap { aligned -> GatheredCard? in
+            guard let page = pagesByID[aligned.pageID] else { return nil }
+            return GatheredCard(
+                page: page,
+                draft: QuestionDraft(
+                    stem: aligned.stem,
+                    studentAnswer: aligned.studentAnswer,
+                    crop: aligned.crop,
+                    confidence: aligned.confidence
+                ),
+                number: aligned.questionNumber,
+                alignment: aligned.status,
+                code: aligned.code,
+                origin: aligned.origin,
+                hint: aligned.markHint
+            )
+        }
+        return (cards, empty)
+    }
+
+    private static func drafts(
+        on page: Page,
+        recognizer: any PageTextRecognizing,
+        takingLastLineAsAnswer: Bool = true
+    ) async throws -> [QuestionDraft] {
         guard !page.purged, let data = SandboxStore.read(relativePath: page.imageRelativePath), !data.isEmpty else {
             throw AppError.recognitionFailed
         }
         do {
             let lines = try await recognizer.recognize(imageData: data)
-            return PrintedQuestionSegmenter.segment(lines)
+            return PrintedQuestionSegmenter.segment(lines, takingLastLineAsAnswer: takingLastLineAsAnswer)
         } catch let error as AppError {
             throw error
         } catch {
@@ -652,6 +962,10 @@ enum JobPipeline {
             ocrConfidence: draft.confidence,
             crop: draft.crop
         )
+        question.questionNumber = item.questionNumber
+        question.alignmentStatus = item.alignmentStatus
+        question.alignmentCode = item.alignmentCode
+        question.origin = item.origin
         context.insert(question)
         question.job = job
         attachCrop(question: question, page: item.page, job: job, crop: draft.crop)
@@ -667,7 +981,7 @@ enum JobPipeline {
         context.insert(canonical)
         question.canonicalAnswer = canonical
 
-        let markHints = job.answerContext == .selfMark ? "疑似已批，自批痕迹不可靠" : nil
+        let markHints = (job.answerContext == .selfMark || item.markHint != nil) ? MarkHints.unreliable : nil
         let answer = Answer(rawOCR: draft.studentAnswer, markHints: markHints)
         context.insert(answer)
         question.answer = answer
@@ -698,6 +1012,7 @@ enum JobPipeline {
             adoption: .none,
             verdictOverride: nil,
             userHoldPending: false,
+            suppressAutoLock: item.alignmentStatus == .failed,
             threshold: threshold
         )
         try await apply(
@@ -733,6 +1048,10 @@ enum JobPipeline {
             SandboxStore.remove(relativePath: item.cropRelativePath)
             context.delete(item)
         }
+    }
+
+    private static func isoTimestamp(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
     }
 
     private static func fetch<T: PersistentModel>(_ type: T.Type, context: ModelContext) -> [T] {

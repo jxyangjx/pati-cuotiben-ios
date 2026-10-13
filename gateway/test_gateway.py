@@ -9,7 +9,8 @@ import unittest
 import urllib.error
 import urllib.request
 
-from gateway.fake_backend import grade, solve, summary_groups
+from gateway.fake_backend import error_analysis, grade, similar, solve, summary_groups
+from gateway.llm import coerce
 from gateway.providers import PROVIDER_NAMES, build_provider
 from gateway.providers.anthropic import AnthropicAdapter
 from gateway.providers.deepseek import DeepSeekAdapter
@@ -74,6 +75,50 @@ class FakeBackendTests(unittest.TestCase):
         self.assertEqual(group["wrong_count"], 1)
         self.assertEqual(group["pending_count"], 1)
         self.assertEqual(group["correct_count"], 0)
+
+    def test_error_tags_and_similar_variants(self):
+        analysis = error_analysis(
+            {
+                "student_answer": "3",
+                "canonical_text": "2",
+                "question_type": "计算题",
+                "subject": "数学",
+            }
+        )
+        self.assertEqual(analysis["tags"], ["计算错误"])
+        body = similar(
+            {
+                "stem_text": "计算：1 + 1 = ?",
+                "canonical_text": "2",
+                "question_type": "计算题",
+                "subject": "数学",
+                "locale": "zh-Hans",
+            }
+        )
+        self.assertGreaterEqual(len(body["items"]), 2)
+        self.assertLessEqual(len(body["items"]), 3)
+        self.assertTrue(all(item["source"] == "generated" for item in body["items"]))
+        coerced = coerce(
+            "similar",
+            {
+                "items": [
+                    {"stem": "第一道", "answer": "1", "source": "library"},
+                    {"stem": "第二道"},
+                    {"stem": "第三道"},
+                    {"stem": "第四道"},
+                ]
+            },
+        )
+        self.assertEqual(len(coerced["items"]), 3)
+        self.assertEqual(coerced["items"][0]["source"], "generated")
+        self.assertEqual(coerced["items"][0]["answer"], "1")
+        self.assertNotIn("answer", coerced["items"][1])
+
+    def test_similar_coerce_rejects_a_single_item(self):
+        from gateway.llm import GatewayError
+
+        with self.assertRaises(GatewayError):
+            coerce("similar", {"items": [{"stem": "只有一道"}]})
 
 
 class ProviderPlanTests(unittest.TestCase):

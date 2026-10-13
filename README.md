@@ -1,6 +1,6 @@
 # 拍题错题本 · iOS 一期
 
-Phase-1 on-device iOS app for PRD v1.5. Homework photos, recognized text, system answers, and the wrong-book stay in the phone sandbox (SwiftData + files). There is no object storage, no Mode B answer-sheet flow, and no WeChat login.
+On-device iOS app for PRD v1.5, including the phase-2 answer-sheet flow, variant practice, and weakness radar. Homework photos, recognized text, system answers, and the wrong-book stay in the phone sandbox (SwiftData + files). There is no object storage and no WeChat login.
 
 ## Open in Xcode
 
@@ -38,19 +38,23 @@ The camera and photo-library usage strings in `Info.plist` include the same phra
 
 - Child profiles: create, edit, switch, archive, restore, delete. Switching children clears upload drafts that have not generated question cards yet.
 - First-run privacy consent, stored locally, before `createChild` and before `recognizePages`.
-- Mode A import: grade and subject are required, answer context is student handwriting or a self-mark hint, pages come from the photo library or the camera, and an optional teacher-key file (Word, image, or PDF) is copied into the sandbox.
+- Import: grade and subject are required. Mode A keeps the handwritten answer on the question page. Mode B asks for question pages first, then answer-sheet pages. Each page can be reordered or retagged. Answer context is student handwriting or a self-mark hint. An optional teacher-key file (Word, image, or PDF) is copied into the sandbox.
 - Printed-text OCR with Apple Vision (`VNRecognizeTextRequest`, accurate, `zh-Hans` and `en-US`) on the page JPEG already stored on device. Numbered lines (`1.` / `1、` / `（1）` / `一、`) start a question. The last line of a multi-line block is treated as the student answer. `1 + 1` does not start a new question.
 - Review cards keep `stemRawOCR`, the editable stem, the editable student snapshot, OCR confidence, and a local crop. Low-confidence cuts stay on the card for correction.
 - System grading. Confidence at or above the threshold (default 0.85, adjustable in Settings) can auto-lock an objective question. Below that, the card stays pending and is not written to the wrong book.
 - Result page with two views: per-question breakdown, and a summary grouped by question type.
-- Wrong book: confirmed wrong answers only, with the student snapshot, canonical text, at least one step, and error analysis (`pending` / `ready` / `failed`).
+- Wrong book: confirmed wrong answers only, with the student snapshot, canonical text, at least one step, error analysis (`pending` / `ready` / `failed`), and up to three error tags.
+- Mode B alignment: `matched`, or `missingAnswer` / `missingQuestion` / `ambiguousNumber` / `unreadable`. The review title shows how many alignments succeeded and failed. Failed cards stay pending until the question number or answer is corrected. Check marks stay in `markHints` and never become a verdict authority.
+- Teacher key: `.docx` is unzipped and read from `word/document.xml` (stored or deflated). PDF uses the text layer. Images are recognized on device when cards are generated. A parsed key replaces `canonical.text` for the matching question number. Solution steps stay system-generated. A `.doc` or an unreadable file stays on the job with a prompt to switch to docx or an image.
+- Variant practice: only on a saved wrong-item detail. The cache key is `wrongItemId|questionType|locale`, and the JSON is `{items:[{stem,answer?,source:"generated"}], generatedAt}`. Generation can be cancelled. A wrong variant attempt is not written to the wrong book.
+- Weakness radar: counts the current child's saved wrong items by subject, question type, and error tag. With no locked wrong items it shows 「完成几次核对后才会出现薄弱项」 and does not create placeholder rows.
 - Settings: privacy note, zip backup, 30-day original-page cleanup (wrong-book crops stay), and the usage note.
 
 Verdict authority is only `user_confirm`, `auto_canonical`, or `auto_objective`. A teacher file is stored as `canonical_answer.source_refs`. Self-mark traces are a hint only.
 
 ## Inference gateway
 
-The app defaults to `StubInferenceClient`. Settings → 推理 can switch to **推理网关**. Live mode still uses the same pipeline: Vision OCR, then `solve` and `grade`, then `error-analysis` after a wrong answer locks, and `summary-groups` for the grouped result tab. Lock rules stay in the app. Photos stay in the sandbox. The gateway receives the current question's text for that call and does not accept image fields.
+The app defaults to `StubInferenceClient`. Settings → 推理 can switch to **推理网关**. Live mode still uses the same pipeline: Vision OCR, then `solve` and `grade`, then `error-analysis` after a wrong answer locks, `summary-groups` for the grouped result tab, and `similar` when a saved wrong item asks for variants. Lock rules stay in the app. Photos stay in the sandbox. The gateway receives the current question's text for that call and does not accept image fields.
 
 The reference server is `gateway/` and uses only the Python standard library. Provider, base URL, and model are configuration. The selectable providers are `fake`, `openai`, `anthropic`, `tongyi`, `zhipu`, and `deepseek`. Each vendor has its own adapter. The Cursor API is not one of them.
 
@@ -90,19 +94,17 @@ On a physical phone, run the gateway with `GATEWAY_HOST=0.0.0.0` and type the co
 
 | Piece | Current behavior |
 | --- | --- |
-| Handwriting OCR | Printed text is recognized first. The answer line is the last line of the printed block and can be edited. |
+| Handwriting OCR | Printed text is recognized first. On a mode A page, the answer line is still the last line of the printed block and can be edited. |
 | Default inference | `StubInferenceClient` stays on device. `1 + 1` is the high-confidence sample. |
-| Live inference | `HTTPInferenceClient` posts text to `/v1/inference/solve`, `/grade`, `/error-analysis`, and `/summary-groups`. |
-| Teacher key | The file is saved locally. Word / PDF text is not parsed, and it is not a grading authority. |
+| Live inference | `HTTPInferenceClient` posts text to `/v1/inference/solve`, `/grade`, `/error-analysis`, `/summary-groups`, and `/similar`. |
+| Teacher key | `.docx` and PDF text are parsed on device. Images are recognized when cards are generated. The file is not a grading authority. |
 | Apple Sign-In | Profiles are local. |
-| Similar questions | Not in this phase. |
 
 Page images are not uploaded.
 
 ## Next milestones
 
-1. **Word teacher key.** Parse `.docx` first, then images and PDF. Align the final answer with the teacher file when parsing works, and keep solution steps system-generated. Offer a retry with docx or an image when parsing fails.
-2. **Handwriting recognition.** If the last-line answer heuristic is not enough, add a handwriting pass that still stays on device.
+1. **Handwriting recognition.** If the last-line answer heuristic is not enough, add a handwriting pass that still stays on device.
 
 ## Layout
 
@@ -111,7 +113,7 @@ PaiTiCuoTiBen.xcodeproj
 Config/              Inference.xcconfig plus an empty Secrets.xcconfig
 gateway/             local multi-provider inference gateway
 PaiTiCuoTiBen/
-  Domain/            grading rules, enums, printed-question segmenter
+  Domain/            grading rules, enums, alignment, teacher-key text, radar, variant cache
   Models/            Child, LocalJob, Page, Question, Answer, CanonicalAnswer, Verdict, WrongItem
   Persistence/       SwiftData, sandbox files, zip backup
   Inference/         InferenceClient, StubInferenceClient, HTTPInferenceClient

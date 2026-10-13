@@ -87,7 +87,7 @@ struct SettingsView: View {
 
             Section("关于") {
                 LabeledContent("版本", value: "0.1.0")
-                Text("模式 A。照片和错题在本机。推理默认是离线桩，也可以改用本机推理网关。")
+                Text("模式 A 同页作答，模式 B 用题目页和答题卡。照片和错题在本机。推理默认是离线桩，也可以改用本机推理网关。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

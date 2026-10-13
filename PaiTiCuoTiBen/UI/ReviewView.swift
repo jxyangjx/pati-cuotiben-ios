@@ -22,9 +22,19 @@ struct ReviewView: View {
                 MissingRecord(text: "找不到这次作业")
             }
         }
-        .navigationTitle("核对题目")
+        .navigationTitle(job?.mode == .b ? "" : "核对题目")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if let job, job.mode == .b {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 0) {
+                        Text("核对题目")
+                            .font(.headline)
+                        Text("对齐成功 \(job.alignmentSuccessCount) · 对齐失败 \(job.alignmentFailureCount)")
+                            .font(.caption2)
+                    }
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("本次结果", action: onShowResult)
                     .disabled(job?.questions.isEmpty ?? true)
@@ -45,12 +55,14 @@ struct ReviewView: View {
                         QuestionCardView(
                             question: question,
                             isBusy: busyID == question.id,
+                            showsAlignment: job.mode == .b,
                             onCanonicalEdited: { touchCanonical(question, job: job) },
                             onConfirmCanonical: { run(question, job: job) { try await JobPipeline.confirmCanonical(question: question, job: job, context: context, inference: session.inference, threshold: threshold) } },
                             onMarkCorrect: { run(question, job: job) { try await JobPipeline.judge(question: question, job: job, result: .correct, context: context, inference: session.inference, threshold: threshold) } },
                             onMarkWrong: { run(question, job: job) { try await JobPipeline.judge(question: question, job: job, result: .wrong, context: context, inference: session.inference, threshold: threshold) } },
                             onMarkPending: { run(question, job: job) { try await JobPipeline.judge(question: question, job: job, result: .pending, context: context, inference: session.inference, threshold: threshold) } },
-                            onRegrade: { run(question, job: job) { try await JobPipeline.reprocessEditedText(question: question, job: job, context: context, inference: session.inference, threshold: threshold) } }
+                            onRegrade: { run(question, job: job) { try await JobPipeline.reprocessEditedText(question: question, job: job, context: context, inference: session.inference, threshold: threshold) } },
+                            onRealign: { run(question, job: job) { try await JobPipeline.realign(job: job, context: context, inference: session.inference, threshold: threshold) } }
                         )
                     }
                 }
@@ -73,10 +85,14 @@ struct ReviewView: View {
                 : "标答和判分使用本机离线桩，不会出网。")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if job.mode == .b {
+                Text("对齐成功 \(job.alignmentSuccessCount) · 对齐失败 \(job.alignmentFailureCount)。失败的题在待确认里，可以手改题号。")
+                    .font(.subheadline.weight(.semibold))
+            }
             if let filename = job.teacherKeyFilename {
-                Text("已挂上老师标答「\(filename)」。最终答案可以和它对齐，解题步骤仍由系统生成。")
+                Text(teacherLine(job, filename: filename))
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(job.teacherKeyStatus == .failed ? Theme.pending : .secondary)
             }
             if job.answerContext == .selfMark {
                 Text("本份作业标记为含自批。批改痕迹只作提示。")
@@ -85,6 +101,21 @@ struct ReviewView: View {
             }
         }
         .cardChrome()
+    }
+
+    private func teacherLine(_ job: LocalJob, filename: String) -> String {
+        switch job.teacherKeyStatus {
+        case .parsed:
+            return "已挂上老师标答「\(filename)」。最终答案已按老师稿对齐，解题步骤仍由系统生成。"
+        case .failed:
+            return job.teacherKeyNote.isEmpty
+                ? "老师标答「\(filename)」没有解析出来。请回到导入页，改用 docx 或图片。"
+                : job.teacherKeyNote
+        case .pending:
+            return "老师标答「\(filename)」还在等待识别。"
+        case .none:
+            return "已挂上老师标答「\(filename)」。"
+        }
     }
 
     private func touchCanonical(_ question: Question, job: LocalJob) {

@@ -9,6 +9,8 @@ final class Page {
     var pixelWidth: Double
     var pixelHeight: Double
     var purged: Bool
+    /// `questionSheet` for mode A. Mode B pages are marked one by one.
+    var roleRaw: String = PageRole.questionSheet.rawValue
     var createdAt: Date
     var job: LocalJob?
 
@@ -18,6 +20,7 @@ final class Page {
         imageRelativePath: String,
         pixelWidth: Double,
         pixelHeight: Double,
+        role: PageRole = .questionSheet,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -26,7 +29,13 @@ final class Page {
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.purged = false
+        self.roleRaw = role.rawValue
         self.createdAt = createdAt
         self.job = nil
+    }
+
+    var role: PageRole {
+        get { PageRole.resolve(roleRaw) }
+        set { roleRaw = newValue.rawValue }
     }
 }

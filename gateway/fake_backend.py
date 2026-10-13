@@ -84,7 +84,35 @@ def error_analysis(payload: dict) -> dict:
             "先自己把步骤写完整，再对照标答逐行看。",
             f"下次做{subject}的{question_type}，先圈出已知条件。",
         ],
+        "tags": ["计算错误"] if question_type == "计算题" else ["审题偏差"],
     }
+
+
+def similar(payload: dict) -> dict:
+    stem = (payload.get("stem_text") or "").replace(" ", "")
+    canonical = payload.get("canonical_text") or ""
+    question_type = payload.get("question_type") or "解答题"
+    if "1+1" in stem or canonical == "2":
+        return {
+            "items": [
+                {"stem": "计算：2 + 3 = ?", "answer": "5", "source": "generated"},
+                {"stem": "计算：4 + 1 = ?", "answer": "5", "source": "generated"},
+                {"stem": "计算：6 - 4 = ?", "answer": "2", "source": "generated"},
+            ]
+        }
+    clipped = clip(payload.get("stem_text") or "")
+    items = [
+        {
+            "stem": f"变式：把「{clipped}」里的一个条件换掉，再答一次。",
+            "answer": canonical,
+            "source": "generated",
+        },
+        {
+            "stem": f"变式：用自己的话重述这道{question_type}，并写出最终答案。",
+            "source": "generated",
+        },
+    ]
+    return {"items": items}
 
 
 def summary_groups(payload: dict) -> dict:
@@ -126,4 +154,6 @@ def handle(kind: str, payload: dict) -> dict:
         return error_analysis(payload)
     if kind == "summary-groups":
         return summary_groups(payload)
+    if kind == "similar":
+        return similar(payload)
     raise KeyError(kind)

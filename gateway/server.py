@@ -29,6 +29,7 @@ ROUTES = {
     "/v1/inference/grade": "grade",
     "/v1/inference/error-analysis": "error-analysis",
     "/v1/inference/summary-groups": "summary-groups",
+    "/v1/inference/similar": "similar",
 }
 MAX_BODY = 256 * 1024
 

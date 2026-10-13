@@ -22,7 +22,7 @@ enum PrintedQuestionSegmenter {
     static let sameLineThreshold: CGFloat = 0.015
     static let cropPadding: CGFloat = 0.01
 
-    static func segment(_ lines: [OCRLine]) -> [QuestionDraft] {
+    static func segment(_ lines: [OCRLine], takingLastLineAsAnswer: Bool = true) -> [QuestionDraft] {
         let rows = readingRows(from: lines)
         guard !rows.isEmpty else { return [] }
 
@@ -39,7 +39,7 @@ enum PrintedQuestionSegmenter {
         if !current.isEmpty {
             blocks.append(current)
         }
-        return blocks.compactMap(draft(from:))
+        return blocks.compactMap { draft(from: $0, takingLastLineAsAnswer: takingLastLineAsAnswer) }
     }
 
     private struct ReadingRow {
@@ -89,13 +89,13 @@ enum PrintedQuestionSegmenter {
         return text.range(of: pattern, options: .regularExpression) != nil
     }
 
-    private static func draft(from rows: [ReadingRow]) -> QuestionDraft? {
+    private static func draft(from rows: [ReadingRow], takingLastLineAsAnswer: Bool) -> QuestionDraft? {
         let texts = rows.map(\.text).filter { !$0.isEmpty }
         guard let first = texts.first else { return nil }
         let stem: String
         let student: String
-        if texts.count == 1 {
-            stem = first
+        if !takingLastLineAsAnswer || texts.count == 1 {
+            stem = texts.joined(separator: "\n")
             student = ""
         } else {
             stem = texts.dropLast().joined(separator: "\n")

@@ -31,6 +31,7 @@ struct ImportView: View {
     @State private var working = false
     @State private var errorMessage: String?
     @State private var skipNotice: SkipNotice?
+    @State private var incomingRole: PageRole = .questionSheet
 
     private var job: LocalJob? { jobs.first { $0.id == jobID } }
 
@@ -101,10 +102,14 @@ struct ImportView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(job.sortedPages.isEmpty || working)
+                .disabled(job.sortedPages.isEmpty || working || (job.mode == .b && !modeBReady(job)))
                 if working {
                     ProgressView(session.inferenceMode == .live ? "正在识别印刷文字，并向网关请求标答" : "正在识别本机上的印刷文字")
                         .font(.caption)
+                } else if job.mode == .b && !modeBReady(job) {
+                    Text("模式 B 至少需要一页题目页和一页答题卡。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else if job.sortedPages.isEmpty {
                     Text("至少需要一页。")
                         .font(.caption)
@@ -126,8 +131,16 @@ struct ImportView: View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeading(
                 title: "当次信息",
-                subtitle: "本期按模式 A 处理：题目和手写答案在同一页。年级、学科每次都要确认。"
+                subtitle: "年级、学科每次都要确认。模式 A 是同页作答；模式 B 先选题目页，再选答题卡。"
             )
+            Picker("题目模式", selection: modeBinding(job)) {
+                ForEach(JobMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            Text(job.mode.detail)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             Picker("年级", selection: gradeBinding(job)) {
                 ForEach(GradeLevel.allCases) { grade in
                     Text(grade.rawValue).tag(grade)
@@ -154,8 +167,21 @@ struct ImportView: View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeading(
                 title: "老师标答（可选）",
-                subtitle: "文件优先级是 Word、图片、PDF。文件只保存在本机。解析放到下一里程碑，老师稿不作为判分权威。"
+                subtitle: "优先级是 Word、图片、PDF。能解析的文字只用来对齐最终答案，解题步骤仍由系统生成。解析失败可以换 docx 或图片。老师稿不作为判分权威。"
             )
+            if job.teacherKeyStatus == .parsed {
+                Text("已解析出老师标答文字，生成卡片时会用来对齐最终答案。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if job.teacherKeyStatus == .failed, !job.teacherKeyNote.isEmpty {
+                Text(job.teacherKeyNote)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.pending)
+            } else if job.teacherKeyStatus == .pending {
+                Text("图片会在生成题目卡片时在本机识别。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             if let filename = job.teacherKeyFilename {
                 Text(filename)
                     .font(.subheadline.weight(.semibold))
@@ -175,18 +201,30 @@ struct ImportView: View {
 
     private func pagesCard(_ job: LocalJob) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeading(title: "页面", subtitle: "按阅读顺序排列。识别只读取保存在本机的印刷文字。可以重拍、替换或删掉某一页。")
+            SectionHeading(
+                title: "页面",
+                subtitle: job.mode == .b
+                    ? "先添加题目页，再添加答题卡。可以拖到另一页上调整顺序，也可以改每一页的角色。"
+                    : "按阅读顺序排列。识别只读取保存在本机的印刷文字。可以重拍、替换或删掉某一页。"
+            )
+            if job.mode == .b {
+                Picker("接下来添加", selection: $incomingRole) {
+                    Text("题目页").tag(PageRole.questionSheet)
+                    Text("答题卡").tag(PageRole.answerSheet)
+                }
+                .pickerStyle(.segmented)
+            }
             HStack {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     Button {
                         showCamera = true
                     } label: {
-                        Label("拍照", systemImage: "camera")
+                        Label(cameraTitle(job), systemImage: "camera")
                     }
                     .buttonStyle(.bordered)
                 }
                 PhotosPicker(selection: $pickerItems, maxSelectionCount: 20, matching: .images) {
-                    Label("相册", systemImage: "photo.on.rectangle")
+                    Label(albumTitle(job), systemImage: "photo.on.rectangle")
                 }
                 .buttonStyle(.bordered)
             }
@@ -199,8 +237,22 @@ struct ImportView: View {
 
     private func pageRow(_ page: Page, job: LocalJob) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("第 \(page.order + 1) 页")
-                .font(.subheadline.weight(.semibold))
+            HStack {
+                Text("第 \(page.order + 1) 页")
+                    .font(.subheadline.weight(.semibold))
+                if job.mode == .b {
+                    Text(page.role.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if job.mode == .b {
+                Picker("页面角色", selection: roleBinding(page, job: job)) {
+                    Text("题目页").tag(PageRole.questionSheet)
+                    Text("答题卡").tag(PageRole.answerSheet)
+                }
+                .pickerStyle(.segmented)
+            }
             SandboxImage(relativePath: page.purged ? nil : page.imageRelativePath, height: 160)
             HStack {
                 Button("上移") { shift(job: job, page: page, direction: -1) }
@@ -227,6 +279,26 @@ struct ImportView: View {
             .font(.subheadline)
             .buttonStyle(.borderless)
         }
+        .draggable(page.id.uuidString)
+        .dropDestination(for: String.self) { items, _ in
+            guard let raw = items.first, let source = UUID(uuidString: raw) else { return false }
+            try? JobPipeline.movePage(job: job, pageID: source, before: page.id, context: context)
+            return true
+        }
+    }
+
+    private func cameraTitle(_ job: LocalJob) -> String {
+        guard job.mode == .b else { return "拍照" }
+        return incomingRole == .answerSheet ? "拍答题卡" : "拍题目页"
+    }
+
+    private func albumTitle(_ job: LocalJob) -> String {
+        guard job.mode == .b else { return "相册" }
+        return incomingRole == .answerSheet ? "答题卡相册" : "题目页相册"
+    }
+
+    private func modeBReady(_ job: LocalJob) -> Bool {
+        job.sortedPages.contains { $0.role == .questionSheet } && job.sortedPages.contains { $0.role == .answerSheet }
     }
 
     private func gradeBinding(_ job: LocalJob) -> Binding<GradeLevel> {
@@ -249,6 +321,25 @@ struct ImportView: View {
         )
     }
 
+    private func modeBinding(_ job: LocalJob) -> Binding<JobMode> {
+        Binding(
+            get: { job.mode },
+            set: { mode in
+                incomingRole = .questionSheet
+                try? JobPipeline.setMode(job: job, mode: mode, context: context)
+            }
+        )
+    }
+
+    private func roleBinding(_ page: Page, job: LocalJob) -> Binding<PageRole> {
+        Binding(
+            get: { page.role },
+            set: { role in
+                try? JobPipeline.setPageRole(page: page, job: job, role: role, context: context)
+            }
+        )
+    }
+
     private func contextBinding(_ job: LocalJob) -> Binding<AnswerContext> {
         Binding(
             get: { job.answerContext },
@@ -260,9 +351,10 @@ struct ImportView: View {
     }
 
     private func addImages(_ datas: [Data], to job: LocalJob) {
+        let role = job.mode == .b ? incomingRole : PageRole.questionSheet
         do {
             for data in datas {
-                try JobPipeline.addPage(job: job, imageData: data, context: context)
+                try JobPipeline.addPage(job: job, imageData: data, context: context, role: role)
             }
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -270,11 +362,12 @@ struct ImportView: View {
     }
 
     private func importPickerItems(_ items: [PhotosPickerItem], job: LocalJob) async {
+        let role = job.mode == .b ? incomingRole : PageRole.questionSheet
         var failed = 0
         for item in items {
             if let image = try? await item.loadTransferable(type: ImportedImage.self) {
                 do {
-                    try JobPipeline.addPage(job: job, imageData: image.data, context: context)
+                    try JobPipeline.addPage(job: job, imageData: image.data, context: context, role: role)
                 } catch {
                     failed += 1
                     errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

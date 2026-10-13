@@ -52,7 +52,8 @@ struct StubInferenceClient: InferenceClient {
             avoidanceTips: [
                 "先自己把步骤写完整，再对照标答逐行看。",
                 "下次做\(request.subject)的\(request.questionType)，先圈出已知条件。",
-            ]
+            ],
+            tags: request.questionType == "计算题" ? ["计算错误"] : ["审题偏差"]
         )
     }
 
@@ -81,6 +82,30 @@ struct StubInferenceClient: InferenceClient {
                 bullets: bullets
             )
         }
+    }
+
+    func similar(_ request: SimilarQuestionRequest) async throws -> SimilarQuestionResponse {
+        let stem = request.stemText.replacingOccurrences(of: " ", with: "")
+        if stem.contains("1+1") || request.canonicalText == "2" {
+            return SimilarQuestionResponse(items: [
+                SimilarQuestionItem(stem: "计算：2 + 3 = ?", answer: "5", source: "generated"),
+                SimilarQuestionItem(stem: "计算：4 + 1 = ?", answer: "5", source: "generated"),
+                SimilarQuestionItem(stem: "计算：6 - 4 = ?", answer: "2", source: "generated"),
+            ])
+        }
+        let clipped = clip(request.stemText)
+        return SimilarQuestionResponse(items: [
+            SimilarQuestionItem(
+                stem: "变式：把「\(clipped)」里的一个条件换掉，再答一次。",
+                answer: request.canonicalText,
+                source: "generated"
+            ),
+            SimilarQuestionItem(
+                stem: "变式：用自己的话重述这道\(request.questionType)，并写出最终答案。",
+                answer: nil,
+                source: "generated"
+            ),
+        ])
     }
 
     private func clip(_ text: String) -> String {
